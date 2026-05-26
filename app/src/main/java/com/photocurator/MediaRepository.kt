@@ -116,11 +116,12 @@ class MediaRepository(private val context: Context) {
         )
 
         // Try both MediaStore.Downloads and MediaStore.Files
+        val filesCollectionUri = MediaStore.Files.getContentUri(volume)
         val collections = mutableListOf<Uri>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             collections.add(MediaStore.Downloads.getContentUri(volume))
         }
-        collections.add(MediaStore.Files.getContentUri(volume))
+        collections.add(filesCollectionUri)
 
         val selection = "${MediaStore.MediaColumns.SIZE} > 0 AND (" +
                 "${MediaStore.MediaColumns.MIME_TYPE} LIKE '%pdf%' OR " +
@@ -128,6 +129,10 @@ class MediaRepository(private val context: Context) {
                 "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.PDF')"
 
         for (collectionUri in collections) {
+            // We need to verify file accessibility only for the Files collection.
+            // PDFs deleted via their Downloads URI leave behind orphaned Files entries
+            // that persist in the MediaStore database across app reinstalls.
+            val isFilesCollection = (collectionUri == filesCollectionUri)
             try {
                 context.contentResolver.query(collectionUri, projection, selection, null, null)?.use { cursor ->
                     val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
@@ -140,7 +145,7 @@ class MediaRepository(private val context: Context) {
                     while (cursor.moveToNext()) {
                         val name = cursor.getString(nameCol) ?: ""
                         val mime = cursor.getString(mimeCol) ?: ""
-                        
+
                         if (!name.endsWith(".pdf", true) && !mime.contains("pdf", true)) {
                             continue
                         }
@@ -149,11 +154,24 @@ class MediaRepository(private val context: Context) {
                         val size = cursor.getLong(sizeCol)
                         val da = cursor.getLong(daCol) * 1000
                         val dm = cursor.getLong(dmCol) * 1000
-                        
-                        val bestDate = resolvePdfDate(name, da, dm)
-                        val uri = ContentUris.withAppendedId(collectionUri, id).toString()
 
-                        mediaList.add(MediaItem(id, uri, "external", bestDate, name, size, MediaType.PDF))
+                        val fileUri = ContentUris.withAppendedId(collectionUri, id)
+
+                        // For MediaStore.Files entries only: verify the file is actually
+                        // accessible.  Stale orphan rows (left after deleting via a
+                        // Downloads URI) will throw here and we silently skip them.
+                        // This check is intentionally skipped for the Downloads collection
+                        // because Downloads entries are always kept in sync with the file.
+                        if (isFilesCollection) {
+                            try {
+                                context.contentResolver.openFileDescriptor(fileUri, "r")?.close()
+                            } catch (_: Exception) {
+                                continue  // file no longer exists — skip stale entry
+                            }
+                        }
+
+                        val bestDate = resolvePdfDate(name, da, dm)
+                        mediaList.add(MediaItem(id, fileUri.toString(), "external", bestDate, name, size, MediaType.PDF))
                     }
                 }
             } catch (e: Exception) {

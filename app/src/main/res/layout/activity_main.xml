@@ -210,14 +210,121 @@
         </LinearLayout>
     </com.google.android.material.appbar.AppBarLayout>
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerView"
+    <!-- FrameLayout carries the AppBar scroll behaviour; sticky header overlays the RecyclerView -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:clipToPadding="false"
-        android:padding="2dp"
-        android:scrollbars="vertical"
-        app:layout_behavior="@string/appbar_scrolling_view_behavior" />
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="2dp"
+            android:scrollbars="vertical" />
+
+        <!-- Sticky header — pins year + month context at top as the user scrolls -->
+        <LinearLayout
+            android:id="@+id/stickyHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:orientation="vertical"
+            android:elevation="6dp"
+            android:visibility="gone">
+
+            <!-- Sticky year row -->
+            <LinearLayout
+                android:id="@+id/stickyYearRow"
+                android:layout_width="match_parent"
+                android:layout_height="60dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@color/surface_variant"
+                android:paddingStart="14dp"
+                android:paddingEnd="16dp"
+                android:clickable="true"
+                android:focusable="true">
+
+                <TextView
+                    android:id="@+id/tvStickyYearArrow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="▼"
+                    android:textSize="13sp"
+                    android:textColor="@color/primary"
+                    android:layout_marginEnd="12dp" />
+
+                <TextView
+                    android:id="@+id/tvStickyYear"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="2023"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/on_surface" />
+
+                <TextView
+                    android:id="@+id/tvStickyYearStats"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="1,234 · 4.2 GB"
+                    android:textSize="12sp"
+                    android:textColor="@color/on_surface_variant" />
+            </LinearLayout>
+
+            <!-- Sticky month row -->
+            <LinearLayout
+                android:id="@+id/stickyMonthRow"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@color/surface"
+                android:paddingStart="28dp"
+                android:paddingEnd="12dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tvStickyMonthArrow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="▼"
+                    android:textSize="11sp"
+                    android:textColor="@color/primary"
+                    android:layout_marginEnd="10dp" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tvStickyMonth"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="January 2024"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/on_surface" />
+
+                    <TextView
+                        android:id="@+id/tvStickyMonthStats"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="45 items · 1.2 GB"
+                        android:textSize="11sp"
+                        android:textColor="@color/on_surface_variant" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+    </FrameLayout>
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabScrollToTop"

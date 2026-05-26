@@ -1,19 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="48dp"
+    android:layout_height="52dp"
     android:orientation="horizontal"
     android:gravity="center_vertical"
     android:background="@color/surface"
-    android:paddingStart="16dp"
-    android:paddingEnd="12dp">
+    android:paddingStart="28dp"
+    android:paddingEnd="12dp"
+    android:clickable="true"
+    android:focusable="true">
+
+    <!-- Expand / collapse chevron -->
+    <TextView
+        android:id="@+id/tvMonthArrow"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="▶"
+        android:textSize="11sp"
+        android:textColor="@color/primary"
+        android:layout_marginEnd="10dp" />
 
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:orientation="vertical">
+
         <TextView
             android:id="@+id/tvMonthLabel"
             android:layout_width="wrap_content"
@@ -22,12 +34,14 @@
             android:textSize="14sp"
             android:textStyle="bold"
             android:textColor="@color/on_surface" />
+
         <TextView
             android:id="@+id/tvPhotoCount"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="3 items"
+            android:text="45 items · 1.2 GB"
             android:textSize="11sp"
             android:textColor="@color/on_surface_variant" />
     </LinearLayout>
+
 </LinearLayout>

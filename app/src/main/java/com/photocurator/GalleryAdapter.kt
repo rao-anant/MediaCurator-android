@@ -20,13 +20,23 @@ import kotlinx.coroutines.*
 class GalleryAdapter(
     private val onMediaClick: (MediaItem) -> Unit,
     private val onMonthHide: (MonthGroup) -> Unit,
+    private val onYearToggle: (Int) -> Unit,
+    private val onMonthToggle: (String) -> Unit,
     private val onSelectionChanged: (Int) -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
-        const val TYPE_HEADER = 0
-        const val TYPE_MEDIA = 1
-        const val TYPE_FOOTER = 2
+        const val TYPE_YEAR_HEADER = 0
+        const val TYPE_HEADER = 1
+        const val TYPE_MEDIA  = 2
+        const val TYPE_FOOTER = 3
+
+        fun fmtBytes(b: Long): String = when {
+            b >= 1_073_741_824L -> "%.1f GB".format(b / 1_073_741_824.0)
+            b >= 1_048_576L     -> "%.1f MB".format(b / 1_048_576.0)
+            b >= 1_024L         -> "%.1f KB".format(b / 1_024.0)
+            else                -> "$b B"
+        }
     }
 
     var currentList: List<GalleryItem> = emptyList()
@@ -60,9 +70,10 @@ class GalleryAdapter(
                             val old = oldList[oldPos]
                             val new = newList[newPos]
                             return when {
-                                old is GalleryItem.Header && new is GalleryItem.Header -> old.monthKey == new.monthKey
-                                old is GalleryItem.Footer && new is GalleryItem.Footer -> old.monthKey == new.monthKey
-                                old is GalleryItem.Media && new is GalleryItem.Media -> old.mediaItem.id == new.mediaItem.id
+                                old is GalleryItem.YearHeader && new is GalleryItem.YearHeader -> old.year == new.year
+                                old is GalleryItem.Header     && new is GalleryItem.Header     -> old.monthKey == new.monthKey
+                                old is GalleryItem.Footer     && new is GalleryItem.Footer     -> old.monthKey == new.monthKey
+                                old is GalleryItem.Media      && new is GalleryItem.Media      -> old.mediaItem.id == new.mediaItem.id
                                 else -> false
                             }
                         }
@@ -118,35 +129,54 @@ class GalleryAdapter(
     override fun getItemCount() = currentList.size
 
     override fun getItemViewType(position: Int) = when (currentList[position]) {
-        is GalleryItem.Header -> TYPE_HEADER
-        is GalleryItem.Media -> TYPE_MEDIA
-        is GalleryItem.Footer -> TYPE_FOOTER
+        is GalleryItem.YearHeader -> TYPE_YEAR_HEADER
+        is GalleryItem.Header     -> TYPE_HEADER
+        is GalleryItem.Media      -> TYPE_MEDIA
+        is GalleryItem.Footer     -> TYPE_FOOTER
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         val inflater = LayoutInflater.from(parent.context)
         return when (viewType) {
-            TYPE_HEADER -> HeaderViewHolder(inflater.inflate(R.layout.item_month_header, parent, false))
-            TYPE_FOOTER -> FooterViewHolder(inflater.inflate(R.layout.item_month_footer, parent, false))
-            else -> MediaViewHolder(inflater.inflate(R.layout.item_photo, parent, false))
+            TYPE_YEAR_HEADER -> YearHeaderViewHolder(inflater.inflate(R.layout.item_year_header, parent, false))
+            TYPE_HEADER      -> HeaderViewHolder(inflater.inflate(R.layout.item_month_header, parent, false))
+            TYPE_FOOTER      -> FooterViewHolder(inflater.inflate(R.layout.item_month_footer, parent, false))
+            else             -> MediaViewHolder(inflater.inflate(R.layout.item_photo, parent, false))
         }
     }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (val item = currentList[position]) {
-            is GalleryItem.Header -> (holder as HeaderViewHolder).bind(item)
-            is GalleryItem.Footer -> (holder as FooterViewHolder).bind(item)
-            is GalleryItem.Media -> (holder as MediaViewHolder).bind(item)
+            is GalleryItem.YearHeader -> (holder as YearHeaderViewHolder).bind(item)
+            is GalleryItem.Header     -> (holder as HeaderViewHolder).bind(item)
+            is GalleryItem.Footer     -> (holder as FooterViewHolder).bind(item)
+            is GalleryItem.Media      -> (holder as MediaViewHolder).bind(item)
+        }
+    }
+
+    inner class YearHeaderViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val tvArrow: TextView = itemView.findViewById(R.id.tvExpandArrow)
+        private val tvYear:  TextView = itemView.findViewById(R.id.tvYear)
+        private val tvStats: TextView = itemView.findViewById(R.id.tvYearStats)
+
+        fun bind(header: GalleryItem.YearHeader) {
+            tvYear.text  = header.year.toString()
+            tvStats.text = "%,d items · %s".format(header.totalItems, fmtBytes(header.totalBytes))
+            tvArrow.text = if (header.isExpanded) "▼" else "▶"
+            itemView.setOnClickListener { onYearToggle(header.year) }
         }
     }
 
     inner class HeaderViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val tvArrow: TextView = itemView.findViewById(R.id.tvMonthArrow)
         private val tvLabel: TextView = itemView.findViewById(R.id.tvMonthLabel)
         private val tvCount: TextView = itemView.findViewById(R.id.tvPhotoCount)
 
         fun bind(header: GalleryItem.Header) {
+            tvArrow.text = if (header.isExpanded) "▼" else "▶"
             tvLabel.text = header.label
-            tvCount.text = "${header.count} item${if (header.count != 1) "s" else ""}"
+            tvCount.text = "%,d items · %s".format(header.count, fmtBytes(header.totalBytes))
+            itemView.setOnClickListener { onMonthToggle(header.monthKey) }
         }
     }
 

@@ -48,22 +48,32 @@ sealed class GalleryItem {
     // to bypass expensive O(N^2) DiffUtil move calculations during large list changes like Sorting.
     abstract val structuralVersion: Int
 
+    data class YearHeader(
+        val year: Int,
+        val totalItems: Int,
+        val totalBytes: Long,
+        val isExpanded: Boolean,
+        override val structuralVersion: Int = 0
+    ) : GalleryItem()
+
     data class Header(
-        val monthKey: String, 
-        val label: String, 
-        val count: Int, 
+        val monthKey: String,
+        val label: String,
+        val count: Int,
+        val totalBytes: Long = 0L,
+        val isExpanded: Boolean = false,
         override val structuralVersion: Int = 0
     ) : GalleryItem()
 
     data class Media(
-        val mediaItem: MediaItem, 
+        val mediaItem: MediaItem,
         val monthKey: String,
         val indexInMonth: Int,
         override val structuralVersion: Int = 0
     ) : GalleryItem()
 
     data class Footer(
-        val monthKey: String, 
+        val monthKey: String,
         override val structuralVersion: Int = 0
     ) : GalleryItem()
 }

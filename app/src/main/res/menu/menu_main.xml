@@ -14,17 +14,15 @@
         </menu>
     </item>
     <item android:id="@+id/action_backup" android:title="Export / Import"
-        app:showAsAction="never">
-        <menu>
-            <item android:id="@+id/action_export_hidden" android:title="Export hidden months" />
-            <item android:id="@+id/action_import_hidden" android:title="Import hidden months" />
-        </menu>
-    </item>
+        app:showAsAction="never" />
     <item android:id="@+id/action_refresh" android:title="Refresh"
         android:icon="@android:drawable/ic_menu_rotate"
         app:showAsAction="ifRoom" />
     <item android:id="@+id/action_one_click_delete"
         android:title="One-Click Delete"
         android:checkable="true"
+        app:showAsAction="never" />
+    <item android:id="@+id/action_help"
+        android:title="Help"
         app:showAsAction="never" />
 </menu>

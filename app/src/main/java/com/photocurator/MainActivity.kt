@@ -97,6 +97,7 @@ class MainActivity : AppCompatActivity() {
                 val layoutManager = recyclerView.layoutManager as? LinearLayoutManager
                 val firstVisible = layoutManager?.findFirstVisibleItemPosition() ?: 0
                 binding.fabScrollToTop.isVisible = firstVisible > 15
+                updateStickyHeader(firstVisible)
             }
         })
     }
@@ -150,7 +151,9 @@ class MainActivity : AppCompatActivity() {
     private fun setupRecyclerView() {
         val spanCount = 4
         adapter = GalleryAdapter(
-            onMediaClick = { item ->
+            onYearToggle  = { year     -> viewModel.toggleYearExpansion(year) },
+            onMonthToggle = { monthKey -> viewModel.toggleMonthExpansion(monthKey) },
+            onMediaClick  = { item ->
                 if (item.type == MediaType.PDF) {
                     val uri = Uri.parse(item.uri)
                     val openIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -229,13 +232,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.autoCompleteMonth.setOnItemClickListener { parent, _, position, _ ->
-            val selectedMonthLabel = parent.getItemAtPosition(position) as String
-            // Year field may contain "2023 (450)" — extract just the number
+            // Item is "Jan (45 / 2.3MB)" — extract the 3-char abbreviation, then match
+            // against the full month label (e.g. "Jan" matches "January 2024").
+            val abbr = (parent.getItemAtPosition(position) as String).substringBefore(" (")
             val yearStr = binding.autoCompleteYear.text.toString().substringBefore(" ").trim()
             val year = yearStr.toIntOrNull() ?: return@setOnItemClickListener
 
             val groups = viewModel.doneMonthsAvailable.value ?: emptyList()
-            val group = groups.find { it.year == year && it.label.startsWith(selectedMonthLabel) }
+            val group = groups.find { it.year == year && it.label.startsWith(abbr) }
             group?.let {
                 viewModel.restoreMonth(it.year, it.month)
                 binding.autoCompleteMonth.setText("", false)
@@ -252,8 +256,49 @@ class MainActivity : AppCompatActivity() {
         } else {
             binding.menuMonth.isEnabled = true
             binding.menuMonth.isVisible = true
-            val monthLabels = monthsInYear.map { it.label.split(" ")[0] }.toTypedArray()
-            binding.autoCompleteMonth.setSimpleItems(monthLabels)
+            val abbrs = monthsInYear.map { it.label.split(" ")[0].take(3) }
+            val stats = monthsInYear.map { group ->
+                val size = fmtBytes(group.items.sumOf { it.size }).replace(" ", "")
+                "${group.items.size} / $size"
+            }
+            val monthAdapter = object : android.widget.ArrayAdapter<String>(
+                this@MainActivity, android.R.layout.simple_dropdown_item_1line, abbrs
+            ) {
+                // MaterialAutoCompleteTextView wraps this adapter and routes
+                // dropdown item creation through getView(), not getDropDownView().
+                override fun getView(
+                    position: Int,
+                    convertView: android.view.View?,
+                    parent: android.view.ViewGroup
+                ): android.view.View {
+                    val ctx = parent.context
+                    // Resolve text colours from the current theme so this works
+                    // on both dark and light themes.
+                    val ta = ctx.theme.obtainStyledAttributes(
+                        intArrayOf(android.R.attr.textColorPrimary, android.R.attr.textColorSecondary)
+                    )
+                    val colorPrimary   = ta.getColor(0, android.graphics.Color.WHITE)
+                    val colorSecondary = ta.getColor(1, 0xFFAAAAAA.toInt())
+                    ta.recycle()
+
+                    val ll = android.widget.LinearLayout(ctx).apply {
+                        orientation = android.widget.LinearLayout.VERTICAL
+                        setPadding(48, 24, 48, 24)
+                    }
+                    ll.addView(android.widget.TextView(ctx).apply {
+                        text = abbrs[position]
+                        textSize = 16f
+                        setTextColor(colorPrimary)
+                    })
+                    ll.addView(android.widget.TextView(ctx).apply {
+                        text = stats[position]
+                        textSize = 13f
+                        setTextColor(colorSecondary)
+                    })
+                    return ll
+                }
+            }
+            binding.autoCompleteMonth.setAdapter(monthAdapter)
         }
     }
 
@@ -261,6 +306,8 @@ class MainActivity : AppCompatActivity() {
         viewModel.galleryItems.observe(this) { items ->
             adapter.submitList(items)
             binding.tvEmpty.isVisible = items.isEmpty()
+            // Re-evaluate sticky after list changes (expansion toggles don't always fire a scroll event)
+            binding.recyclerView.post { updateStickyHeader() }
         }
         
         viewModel.isLoading.observe(this) { loading ->
@@ -398,11 +445,18 @@ class MainActivity : AppCompatActivity() {
         R.id.sort_count_month   -> { viewModel.setSortMode(SortMode.COUNT_PER_MONTH);   true }
         R.id.action_refresh -> { viewModel.loadMedia(forceRefresh = true); true }
         R.id.action_one_click_delete -> { requestManageMediaPermission(); true }
-        R.id.action_export_hidden -> { exportHiddenMonths(); true }
-        R.id.action_import_hidden -> {
-            importLauncher.launch(arrayOf("application/json", "application/octet-stream", "*/*"))
+        R.id.action_backup -> {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Hidden months backup")
+                .setItems(arrayOf("Export to Downloads", "Import from file")) { _, which ->
+                    if (which == 0) exportHiddenMonths()
+                    else importLauncher.launch(arrayOf("application/json", "application/octet-stream", "*/*"))
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
             true
         }
+        R.id.action_help -> { showHelpDialog(); true }
         else -> super.onOptionsItemSelected(item)
     }
 
@@ -543,6 +597,62 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    // ── Sticky header ─────────────────────────────────────────────────────────
+
+    private fun updateStickyHeader(firstVisiblePos: Int = -1) {
+        val lm = binding.recyclerView.layoutManager as? LinearLayoutManager ?: return
+        val firstPos = if (firstVisiblePos >= 0) firstVisiblePos
+                       else lm.findFirstVisibleItemPosition()
+        if (firstPos < 0) { binding.stickyHeader.isVisible = false; return }
+
+        val list      = adapter.currentList
+        val firstItem = list.getOrNull(firstPos)
+
+        // Walk back to find the nearest YearHeader and Header above the viewport top
+        var yearCtx:  GalleryItem.YearHeader? = null
+        var monthCtx: GalleryItem.Header?     = null
+        for (i in firstPos downTo 0) {
+            val item = list.getOrNull(i) ?: break
+            if (monthCtx == null && item is GalleryItem.Header) monthCtx = item
+            if (item is GalleryItem.YearHeader) { yearCtx = item; break }
+        }
+
+        // Hide when no year context, or the year header itself is already at the top
+        if (yearCtx == null || firstItem is GalleryItem.YearHeader) {
+            binding.stickyHeader.isVisible = false
+            return
+        }
+
+        binding.stickyHeader.isVisible = true
+
+        // Month row — only when inside a month (month header itself has scrolled off top)
+        val showMonth = monthCtx != null && firstItem !is GalleryItem.Header
+        binding.stickyMonthRow.isVisible = showMonth
+
+        // Year row — always shown while sticky is visible.
+        // Behaviour: "go up one level."
+        //   • Inside an open month  → tap closes the MONTH, keeping the year expanded
+        //   • Browsing month headers → tap closes the YEAR
+        binding.tvStickyYearArrow.text = if (yearCtx.isExpanded) "▼" else "▶"
+        binding.tvStickyYear.text      = yearCtx.year.toString()
+        binding.tvStickyYearStats.text = "%,d · %s".format(yearCtx.totalItems, GalleryAdapter.fmtBytes(yearCtx.totalBytes))
+        val capturedYear = yearCtx.year
+        if (showMonth && monthCtx != null) {
+            val capturedKey = monthCtx.monthKey
+            binding.stickyYearRow.setOnClickListener { viewModel.toggleMonthExpansion(capturedKey) }
+        } else {
+            binding.stickyYearRow.setOnClickListener { viewModel.toggleYearExpansion(capturedYear) }
+        }
+
+        if (showMonth && monthCtx != null) {
+            binding.tvStickyMonthArrow.text = if (monthCtx.isExpanded) "▼" else "▶"
+            binding.tvStickyMonth.text      = monthCtx.label
+            binding.tvStickyMonthStats.text = "%,d items · %s".format(monthCtx.count, GalleryAdapter.fmtBytes(monthCtx.totalBytes))
+            val capturedKey = monthCtx.monthKey
+            binding.stickyMonthRow.setOnClickListener { viewModel.toggleMonthExpansion(capturedKey) }
+        }
+    }
+
     // ── Export / Import ───────────────────────────────────────────────────────
 
     private fun exportHiddenMonths() {
@@ -614,4 +724,60 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showToast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+
+    // ── Help ──────────────────────────────────────────────────────────────────
+
+    private fun showHelpDialog() {
+        val text = """
+Systematic, month-by-month curation of a large media library - all without losing your place. This is the key feature of the app.
+
+Most gallery apps show everything at once. This one lets you work through your library like a task list: open a year, open a month, delete what you don’t want, then hide the month when you’re done.
+
+Hidden items stay out of the way within the app but aren’t deleted - they remain fully accessible in your phone’s regular gallery. Should you wish, you can unhide them anytime you want as well. Auto-backup preserves your progress across reinstalls and device transfers.
+
+Built for people with years of accumulated photos, videos, and PDFs who want to clean up methodically - not just browse.
+─────────────────────────────
+📂 BROWSING (Tree View)
+Years are shown collapsed. Tap a year to expand it and see its months. Tap a month to see its items. Tap again to collapse.
+
+📌 STICKY HEADER
+While scrolling inside a year/month, a floating bar stays pinned at the top showing where you are. Tap it to collapse the open month (or the year, if no month is open).
+
+🙈 HIDING A MONTH
+Scroll to the bottom of any open month and tap "Hide this month". The month disappears from your gallery — files are NOT deleted, just hidden from this app.
+
+👁️ UNHIDING
+When you have hidden months, a bar appears at the top. Pick a year and month to restore it instantly. The app scrolls straight to it.
+
+🗑️ DELETING FILES
+Long-press any item to enter multi-select mode. Tap more items to add them to the selection. Tap Delete in the bar at the bottom.
+
+⚡ ONE-CLICK DELETE (menu)
+When enabled, a single tap on any item deletes it immediately — no confirmation. Use with care.
+
+🔢 SORT OPTIONS (menu → Sort)
+• Newest / Oldest first — by capture date
+• Largest first (overall) — biggest files first, across all months
+• Largest first (per month) — months ordered by their total size
+• Most items first — months with the most files appear at the top
+
+💾 BACKUP (menu → Export / Import)
+Hidden-month state is auto-saved to mediacurator_hidden.json in your Downloads folder after every hide/unhide. It survives app-data clears and reinstalls — just reinstall and the state restores automatically. Use Export / Import to move your state to another device.
+
+ℹ️ Note: mediacurator_hidden.json is NOT deleted when you uninstall the app. Delete it manually from your Downloads folder if you want a completely clean slate.
+        """.trimIndent()
+
+        val tv = android.widget.TextView(this).apply {
+            this.text = text
+            textSize  = 13f
+            setLineSpacing(4f, 1f)
+            setPadding(56, 32, 56, 24)
+        }
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Media Curator — Help")
+            .setView(android.widget.ScrollView(this).apply { addView(tv) })
+            .setPositiveButton("Got it", null)
+            .show()
+    }
 }

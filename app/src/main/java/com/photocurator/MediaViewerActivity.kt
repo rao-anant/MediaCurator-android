@@ -33,10 +33,8 @@ class MediaViewerActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
             val success = result.resultCode == Activity.RESULT_OK
             viewModel.onDeletePermissionResult(success)
-            if (success) {
-                // Return to grid after successful deletion
-                finish()
-            }
+            // Don't finish here — flatMediaItems update will advance to the next item,
+            // and the viewer closes automatically when the list becomes empty.
         }
 
     companion object {
@@ -52,28 +50,26 @@ class MediaViewerActivity : AppCompatActivity() {
         val startId = intent.getLongExtra(EXTRA_START_ID, -1L)
         val startPosition = intent.getIntExtra(EXTRA_START_POSITION, 0)
 
-        viewModel.galleryItems.observe(this) { items ->
-            val mediaItems = items.filterIsInstance<GalleryItem.Media>().map { it.mediaItem }
-            
+        viewModel.flatMediaItems.observe(this) { mediaItems ->
             if (mediaItems.isEmpty() && viewModel.isLoading.value == false) {
                 finish()
                 return@observe
             }
-            
+
             if (mediaItems.isNotEmpty()) {
                 if (!::adapter.isInitialized) {
                     adapter = MediaPagerAdapter(mediaItems) { finish() }
                     binding.viewPager.adapter = adapter
-                    
+
                     // Find position by ID if provided, else fallback to index
                     val initialPos = if (startId != -1L) {
                         mediaItems.indexOfFirst { it.id == startId }.takeIf { it != -1 } ?: startPosition
                     } else {
                         startPosition
                     }
-                    
+
                     binding.viewPager.setCurrentItem(initialPos, false)
-                    
+
                     binding.viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
                         override fun onPageSelected(position: Int) {
                             if (position < mediaItems.size) {
@@ -85,7 +81,14 @@ class MediaViewerActivity : AppCompatActivity() {
                         updateUIForItem(mediaItems[initialPos])
                     }
                 } else {
+                    val prevPos = binding.viewPager.currentItem
                     adapter.updateItems(mediaItems)
+                    // Deleted item was the last one — back up to the new last item
+                    if (prevPos >= mediaItems.size) {
+                        val newPos = mediaItems.size - 1
+                        binding.viewPager.setCurrentItem(newPos, false)
+                        updateUIForItem(mediaItems[newPos])
+                    }
                 }
             }
         }
@@ -96,11 +99,8 @@ class MediaViewerActivity : AppCompatActivity() {
             }
         }
 
-        viewModel.deletionCompletedEvent.observe(this) { completed ->
-            if (completed) {
-                finish()
-            }
-        }
+        // deletionCompletedEvent no longer closes the viewer — the flatMediaItems
+        // observer advances to the next item and closes only when the list is empty.
 
         binding.btnShare.setOnClickListener {
             if (::adapter.isInitialized && binding.viewPager.currentItem < adapter.itemCount) {
