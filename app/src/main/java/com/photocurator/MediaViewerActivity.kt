@@ -1,4 +1,4 @@
-package com.photocurator
+﻿package com.anant.mediacurator
 
 import android.app.Activity
 import android.content.Intent
@@ -18,8 +18,8 @@ import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.bumptech.glide.Glide
-import com.photocurator.databinding.ActivityMediaViewerBinding
-import com.photocurator.databinding.ItemViewerMediaBinding
+import com.anant.mediacurator.databinding.ActivityMediaViewerBinding
+import com.anant.mediacurator.databinding.ItemViewerMediaBinding
 
 class MediaViewerActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMediaViewerBinding

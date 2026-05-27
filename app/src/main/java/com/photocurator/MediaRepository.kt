@@ -1,4 +1,4 @@
-package com.photocurator
+﻿package com.anant.mediacurator
 
 import android.content.ContentUris
 import android.content.Context

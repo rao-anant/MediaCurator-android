@@ -1,4 +1,4 @@
-package com.photocurator
+﻿package com.anant.mediacurator
 
 import android.app.Application
 import android.content.ContentUris
@@ -298,10 +298,16 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 // even when only Videos (or Photos, or PDFs) are displayed.
                 // The thumbnails shown when a month is expanded are still type-filtered.
                 val allMonthLookup = allVisibleFull.associateBy { it.key }
-                val allYearStats   = allVisibleFull.groupBy { it.year }.mapValues { (_, groups) ->
-                    Pair(
-                        groups.sumOf { it.items.size },
-                        groups.sumOf { g -> g.items.sumOf { it.size } }
+                // Per-year stats: total count, total bytes, and per-type counts — all from
+                // allVisibleFull so header numbers are stable regardless of chip filter.
+                data class YearStat(val total: Int, val bytes: Long, val photos: Int, val videos: Int, val pdfs: Int)
+                val allYearStats = allVisibleFull.groupBy { it.year }.mapValues { (_, groups) ->
+                    YearStat(
+                        total  = groups.sumOf { it.items.size },
+                        bytes  = groups.sumOf { g -> g.items.sumOf { it.size } },
+                        photos = groups.sumOf { g -> g.items.count { it.type == MediaType.IMAGE } },
+                        videos = groups.sumOf { g -> g.items.count { it.type == MediaType.VIDEO } },
+                        pdfs   = groups.sumOf { g -> g.items.count { it.type == MediaType.PDF   } }
                     )
                 }
 
@@ -315,19 +321,25 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
                 val treeItems = ArrayList<GalleryItem>()
                 for ((year, months) in yearToMonths) {
-                    val (yearItemCount, yearBytes) = allYearStats[year] ?: Pair(
-                        months.sumOf { it.items.size },
-                        months.sumOf { g -> g.items.sumOf { it.size } }
-                    )
+                    val ys = allYearStats[year]
+                    val yearItemCount = ys?.total  ?: months.sumOf { it.items.size }
+                    val yearBytes     = ys?.bytes  ?: months.sumOf { g -> g.items.sumOf { it.size } }
+                    val yearPhotos    = ys?.photos ?: 0
+                    val yearVideos    = ys?.videos ?: 0
+                    val yearPdfs      = ys?.pdfs   ?: 0
                     val isYearExpanded = expandedYearsSnapshot.contains(year)
-                    treeItems.add(GalleryItem.YearHeader(year, yearItemCount, yearBytes, isYearExpanded, currentVersion))
+                    treeItems.add(GalleryItem.YearHeader(year, yearItemCount, yearBytes, isYearExpanded, yearPhotos, yearVideos, yearPdfs, currentVersion))
                     if (isYearExpanded) {
                         for (group in months) {
                             val allGroup        = allMonthLookup[group.key]
-                            val monthItemCount  = allGroup?.items?.size ?: group.items.size
-                            val monthBytes      = allGroup?.items?.sumOf { it.size } ?: group.items.sumOf { it.size }
+                            val src             = allGroup?.items ?: group.items
+                            val monthItemCount  = src.size
+                            val monthBytes      = src.sumOf { it.size }
+                            val monthPhotos     = src.count { it.type == MediaType.IMAGE }
+                            val monthVideos     = src.count { it.type == MediaType.VIDEO }
+                            val monthPdfs       = src.count { it.type == MediaType.PDF   }
                             val isMonthExpanded = expandedMonthsSnapshot.contains(group.key)
-                            treeItems.add(GalleryItem.Header(group.key, group.label, monthItemCount, monthBytes, isMonthExpanded, currentVersion))
+                            treeItems.add(GalleryItem.Header(group.key, group.label, monthItemCount, monthBytes, isMonthExpanded, monthPhotos, monthVideos, monthPdfs, currentVersion))
                             if (isMonthExpanded) {
                                 group.items.forEachIndexed { index, mediaItem ->
                                     treeItems.add(GalleryItem.Media(mediaItem, group.key, index, null, currentVersion))
@@ -386,23 +398,10 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val resolver = getApplication<Application>().contentResolver
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                    && Environment.isExternalStorageManager()
-                ) {
-                    // MANAGE_EXTERNAL_STORAGE is granted (required for PDF access).
-                    // ContentResolver.delete works directly for any file on external
-                    // storage — no system dialog needed.
-                    items.forEach { item ->
-                        try {
-                            resolver.delete(android.net.Uri.parse(item.uri), null, null)
-                        } catch (e: Exception) {
-                            Log.e("GalleryViewModel", "Direct delete failed: ${item.displayName}: ${e.message}")
-                        }
-                    }
-                    updateUiAfterDeletion(fingerprints, totalBytes)
-
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    // No MANAGE_EXTERNAL_STORAGE — request user consent via system dialog.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    // Android 11+: use createDeleteRequest.
+                    // On Android 12+ with MANAGE_MEDIA granted this runs silently (no dialog).
+                    // On Android 11 or without MANAGE_MEDIA a system confirmation dialog appears.
                     val intentSender = repo.createDeleteRequest(items)
                     if (intentSender != null) {
                         pendingItemsToDelete = items
@@ -416,9 +415,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                         cachedRawMedia = null
                         loadMedia(forceRefresh = true)
                     }
-
                 } else {
-                    // Pre-R: attempt direct deletion.
+                    // Pre-R: direct deletion, no dialog needed.
                     items.forEach { item ->
                         try {
                             resolver.delete(android.net.Uri.parse(item.uri), null, null)
@@ -560,12 +558,23 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val collection = MediaStore.Downloads.getContentUri("external")
 
-                    // Remove any existing copy we own (silently ignore if owned by old UID after reinstall)
+                    // Delete ALL MediaStore rows whose display name starts with our base name.
+                    // After an app-ID change the original file is owned by the old package and
+                    // the delete below silently fails, causing Android to create "(1)", "(2)"…
+                    // variants on each subsequent write.  Querying by LIKE catches those too.
                     try {
+                        // Exact name (own files after first reinstall)
                         resolver.delete(
                             collection,
                             "${MediaStore.Downloads.DISPLAY_NAME} = ?",
                             arrayOf(AUTO_BACKUP_FILENAME)
+                        )
+                        // Numbered variants we own: "mediacurator_hidden (1).json" etc.
+                        val baseName = AUTO_BACKUP_FILENAME.removeSuffix(".json")
+                        resolver.delete(
+                            collection,
+                            "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
+                            arrayOf("$baseName (%).json")
                         )
                     } catch (_: Exception) {}
 
@@ -595,8 +604,18 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * On first launch (or after app-data clear / reinstall), silently restore from the
-     * auto-backup file in Downloads if local prefs are empty.
+     * On first launch (or after app-data clear / reinstall / app-ID change), silently
+     * restore from the auto-backup file in Downloads if local prefs are empty.
+     *
+     * Two-pass strategy for Android 10+:
+     *   1. MediaStore query  — works for files owned by this package.
+     *   2. Direct file path  — fallback for files written by a previous package name
+     *      (e.g. com.photocurator → com.anant.mediacurator). The file is physically
+     *      present but MediaStore ownership has changed, so pass 1 returns nothing.
+     *
+     * Race-condition fix: loadMedia() is called after a successful restore so the
+     * gallery immediately reflects the restored state (the init-block call to loadMedia
+     * from requestPermissionsIfNeeded fires before this async restore completes).
      */
     private fun checkAndAutoRestore() {
         if (prefs.getDoneMonths().isNotEmpty()) return  // prefs already populated — nothing to do
@@ -604,9 +623,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val app      = getApplication<Application>()
                 val resolver = app.contentResolver
+
                 val json: String? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    // Pass 1: MediaStore (own files)
                     val collection = MediaStore.Downloads.getContentUri("external")
-                    resolver.query(
+                    val fromMediaStore = resolver.query(
                         collection,
                         arrayOf(MediaStore.Downloads._ID),
                         "${MediaStore.Downloads.DISPLAY_NAME} = ?",
@@ -617,6 +638,17 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                         val id  = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
                         val uri = ContentUris.withAppendedId(collection, id)
                         resolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                    }
+
+                    // Pass 2: direct path fallback (covers renamed package / cross-app files)
+                    fromMediaStore ?: run {
+                        @Suppress("DEPRECATION")
+                        val file = File(
+                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                            AUTO_BACKUP_FILENAME
+                        )
+                        if (file.exists()) try { file.readText(Charsets.UTF_8) } catch (_: Exception) { null }
+                        else null
                     }
                 } else {
                     @Suppress("DEPRECATION")
@@ -634,6 +666,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                     if (months.isNotEmpty()) {
                         prefs.setDoneMonths(months)
                         Log.i("GalleryViewModel", "Auto-restored ${months.size} hidden months from backup")
+                        // Re-trigger load so the restored state is visible immediately.
+                        // (The initial loadMedia call races ahead of this IO coroutine.)
+                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            loadMedia(forceRefresh = false)
+                        }
                     }
                 }
             } catch (e: Exception) {

@@ -1,4 +1,4 @@
-package com.photocurator
+﻿package com.anant.mediacurator
 
 import android.Manifest
 import android.app.Activity
@@ -25,7 +25,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.photocurator.databinding.ActivityMainBinding
+import com.anant.mediacurator.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adapter: GalleryAdapter
     
     private var offeredOneClickDelete = false
+    private var offeredAllFilesAccess = false  // show the PDF-access prompt only once per session
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -48,11 +49,6 @@ class MainActivity : AppCompatActivity() {
             } else {
                 showToast("Storage permission is required to view your media")
             }
-        }
-
-    private val allFilesAccessLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            viewModel.loadMedia(forceRefresh = true)
         }
 
     private val deleteLauncher =
@@ -64,6 +60,12 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             invalidateOptionsMenu()
             showToast(if (hasManageMediaPermission()) "One-Click Delete enabled" else "One-Click Delete disabled")
+        }
+
+    private val allFilesAccessLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            // User returned from the "All files access" settings screen — reload so PDFs appear.
+            viewModel.loadMedia()
         }
 
     private val importLauncher =
@@ -84,6 +86,11 @@ class MainActivity : AppCompatActivity() {
         setupScrollToTop()
         observeViewModel()
         requestPermissionsIfNeeded()
+        // Pre-warm the AlertDialog machinery so the first real dialog opens instantly.
+        // Android inflates dialog windows lazily; the first one takes ~300-600 ms.
+        window.decorView.post {
+            androidx.appcompat.app.AlertDialog.Builder(this).create().also { it.show(); it.dismiss() }
+        }
     }
 
     private fun setupScrollToTop() {
@@ -127,9 +134,6 @@ class MainActivity : AppCompatActivity() {
                 return@setOnCheckedChangeListener
             }
             viewModel.setIncludePdf(isChecked)
-            if (isChecked && !hasAllFilesPermission()) {
-                requestAllFilesPermission()
-            }
         }
     }
 
@@ -213,7 +217,8 @@ class MainActivity : AppCompatActivity() {
             if (!binding.selectionBar.isVisible) {
                 binding.selectionBar.isVisible = true
             }
-            binding.tvSelectionCount.text = "$count selected"
+            val totalBytes = adapter.getSelectedItems().sumOf { it.size }
+            binding.tvSelectionCount.text = "$count selected · ${GalleryAdapter.fmtBytes(totalBytes)}"
             binding.btnDeleteSelected.isEnabled = true
         } else {
             binding.selectionBar.isVisible = false
@@ -526,31 +531,36 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun hasAllFilesPermission(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                Environment.isExternalStorageManager()
+
+    /**
+     * Load media immediately (photos/videos don't need broad storage access).
+     * If MANAGE_EXTERNAL_STORAGE is not granted on Android 11+, show a one-time
+     * prompt explaining that PDFs won't be visible without it.
+     */
     private fun checkAllFilesAccessAndLoad() {
-        if (viewModel.includePdf.value == true && !hasAllFilesPermission()) {
-            requestAllFilesPermission()
-        } else {
-            viewModel.loadMedia()
-        }
-    }
-
-    private fun hasAllFilesPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Environment.isExternalStorageManager()
-        } else true
-    }
-
-    private fun requestAllFilesPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            try {
-                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                    data = Uri.parse("package:$packageName")
+        viewModel.loadMedia()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+            && !hasAllFilesPermission()
+            && !offeredAllFilesAccess
+        ) {
+            offeredAllFilesAccess = true
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("PDF access")
+                .setMessage(
+                    "To browse PDF files, Media Curator needs the \"All files access\" permission.\n\n" +
+                    "Photos and videos work without it. Tap Grant to enable PDFs."
+                )
+                .setPositiveButton("Grant") { _, _ ->
+                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    allFilesAccessLauncher.launch(intent)
                 }
-                allFilesAccessLauncher.launch(intent)
-            } catch (e: Exception) {
-                val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                allFilesAccessLauncher.launch(intent)
-            }
+                .setNegativeButton("Skip", null)
+                .show()
         }
     }
 
@@ -650,7 +660,7 @@ class MainActivity : AppCompatActivity() {
         //   • Browsing month headers → tap closes the YEAR
         binding.tvStickyYearArrow.text = if (yearCtx.isExpanded) "▼" else "▶"
         binding.tvStickyYear.text      = yearCtx.year.toString()
-        binding.tvStickyYearStats.text = "%,d · %s".format(yearCtx.totalItems, GalleryAdapter.fmtBytes(yearCtx.totalBytes))
+        binding.tvStickyYearStats.text = GalleryAdapter.formatTypeBreakdown(yearCtx.photoCount, yearCtx.videoCount, yearCtx.pdfCount, yearCtx.totalBytes)
         val capturedYear = yearCtx.year
         if (showMonth && monthCtx != null) {
             val capturedKey = monthCtx.monthKey
@@ -662,7 +672,7 @@ class MainActivity : AppCompatActivity() {
         if (showMonth && monthCtx != null) {
             binding.tvStickyMonthArrow.text = if (monthCtx.isExpanded) "▼" else "▶"
             binding.tvStickyMonth.text      = monthCtx.label
-            binding.tvStickyMonthStats.text = "%,d items · %s".format(monthCtx.count, GalleryAdapter.fmtBytes(monthCtx.totalBytes))
+            binding.tvStickyMonthStats.text = GalleryAdapter.formatTypeBreakdown(monthCtx.photoCount, monthCtx.videoCount, monthCtx.pdfCount, monthCtx.totalBytes)
             val capturedKey = monthCtx.monthKey
             binding.stickyMonthRow.setOnClickListener { viewModel.toggleMonthExpansion(capturedKey) }
         }

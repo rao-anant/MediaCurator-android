@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy – Media Curator</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #333; }
+        h1 { color: #111; }
+        h2 { margin-top: 2em; color: #222; }
+    </style>
+</head>
+<body>
+
+<h1>Privacy Policy</h1>
+<p><strong>App:</strong> Media Curator<br>
+<strong>Developer:</strong> Anant Rao<br>
+<strong>Last updated:</strong> May 2025</p>
+
+<h2>Overview</h2>
+<p>Media Curator is a local media management app. It helps you browse, curate, and delete photos, videos, and PDFs stored on your device. <strong>No data ever leaves your device.</strong> The app has no servers, no accounts, no analytics, and no internet connection.</p>
+
+<h2>What the app accesses</h2>
+<ul>
+    <li><strong>Photos and videos</strong> — read from your device's MediaStore to display thumbnails and allow deletion.</li>
+    <li><strong>PDF files</strong> — read from publicly accessible storage locations (Downloads, Documents, etc.) to display and allow deletion.</li>
+    <li><strong>Downloads folder (write)</strong> — used solely to save and restore a local backup file (<code>mediacurator_hidden.json</code>) that records which months you have marked as done. This file stays on your device.</li>
+</ul>
+
+<h2>What the app does NOT do</h2>
+<ul>
+    <li>Does not collect any personal data.</li>
+    <li>Does not transmit any data over the internet.</li>
+    <li>Does not use analytics, advertising, or crash-reporting SDKs.</li>
+    <li>Does not access your contacts, location, microphone, or camera.</li>
+    <li>Does not share any data with third parties.</li>
+</ul>
+
+<h2>Permissions explained</h2>
+<ul>
+    <li><strong>READ_MEDIA_IMAGES / READ_MEDIA_VIDEO</strong> — required to display your photos and videos.</li>
+    <li><strong>READ_EXTERNAL_STORAGE</strong> — used on Android 12 and below for the same purpose.</li>
+    <li><strong>WRITE_EXTERNAL_STORAGE</strong> — used on Android 9 and below to save the backup file.</li>
+    <li><strong>MANAGE_MEDIA</strong> — optional. When granted, allows deleting media without a confirmation dialog on each operation (Android 12+). You can enable or disable this in the app's menu.</li>
+    <li><strong>All files access (MANAGE_EXTERNAL_STORAGE)</strong> — required on Android 11+ to browse PDF files stored in Downloads, Documents, and other shared folders. Android's granular media permissions (READ_MEDIA_IMAGES / READ_MEDIA_VIDEO) cover only photos and videos; there is no standard permission for reading PDFs across folders on Android 13+. Photos and videos work without this permission. The app does not use this permission to collect, upload, or share any data.</li>
+</ul>
+
+<h2>Data storage</h2>
+<p>The only file the app writes is <code>mediacurator_hidden.json</code> in your Downloads folder. It contains a list of year-month keys you have marked as done (e.g. <code>"2023-04"</code>). It contains no photos, no personal information, and no device identifiers. You can delete it at any time.</p>
+
+<h2>Children's privacy</h2>
+<p>The app is not directed at children under 13 and does not knowingly collect any information from children.</p>
+
+<h2>Changes to this policy</h2>
+<p>If the privacy policy changes, the updated version will be posted at this URL with a revised date.</p>
+
+<h2>Contact</h2>
+<p>If you have any questions about this privacy policy, you can reach the developer at the contact address provided on the Play Store listing.</p>
+
+</body>
+</html>

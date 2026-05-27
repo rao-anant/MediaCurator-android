@@ -1,4 +1,4 @@
-package com.photocurator
+﻿package com.anant.mediacurator
 
 import java.io.Serializable
 
@@ -53,6 +53,9 @@ sealed class GalleryItem {
         val totalItems: Int,
         val totalBytes: Long,
         val isExpanded: Boolean,
+        val photoCount: Int = 0,
+        val videoCount: Int = 0,
+        val pdfCount: Int = 0,
         override val structuralVersion: Int = 0
     ) : GalleryItem()
 
@@ -62,6 +65,9 @@ sealed class GalleryItem {
         val count: Int,
         val totalBytes: Long = 0L,
         val isExpanded: Boolean = false,
+        val photoCount: Int = 0,
+        val videoCount: Int = 0,
+        val pdfCount: Int = 0,
         override val structuralVersion: Int = 0
     ) : GalleryItem()
 

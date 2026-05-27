@@ -4,11 +4,14 @@
 
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <!-- Needed for PDFs on Android 11+ to scan the whole device -->
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.MANAGE_MEDIA" />
+    <!-- Required on Android 13+ to browse PDF files stored by other apps (Downloads, Documents,
+         etc.). Standard media permissions (READ_MEDIA_IMAGES/VIDEO) do not cover non-media file
+         types. Declared under the "Files and Documents" use case for Play Store review. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
 
     <application
         android:allowBackup="true"

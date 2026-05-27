@@ -1,4 +1,4 @@
-package com.photocurator
+﻿package com.anant.mediacurator
 
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -36,6 +36,18 @@ class GalleryAdapter(
             b >= 1_048_576L     -> "%.1f MB".format(b / 1_048_576.0)
             b >= 1_024L         -> "%.1f KB".format(b / 1_024.0)
             else                -> "$b B"
+        }
+
+        /** "3 photos · 1 video · 2 PDFs · 1.2 GB" — omits zero-count types */
+        @JvmStatic
+        fun formatTypeBreakdown(photos: Int, videos: Int, pdfs: Int, bytes: Long): String {
+            val parts = mutableListOf<String>()
+            if (photos > 0) parts.add("%,d %s".format(photos, if (photos == 1) "photo"  else "photos"))
+            if (videos > 0) parts.add("%,d %s".format(videos, if (videos == 1) "video"  else "videos"))
+            if (pdfs   > 0) parts.add("%,d PDF%s".format(pdfs, if (pdfs == 1) "" else "s"))
+            if (parts.isEmpty()) parts.add("0 items")
+            parts.add(fmtBytes(bytes))
+            return parts.joinToString(" · ")
         }
 
         fun formatDuration(ms: Long): String {
@@ -169,7 +181,7 @@ class GalleryAdapter(
 
         fun bind(header: GalleryItem.YearHeader) {
             tvYear.text  = header.year.toString()
-            tvStats.text = "%,d items · %s".format(header.totalItems, fmtBytes(header.totalBytes))
+            tvStats.text = formatTypeBreakdown(header.photoCount, header.videoCount, header.pdfCount, header.totalBytes)
             tvArrow.text = if (header.isExpanded) "▼" else "▶"
             itemView.setOnClickListener { onYearToggle(header.year) }
         }
@@ -183,7 +195,7 @@ class GalleryAdapter(
         fun bind(header: GalleryItem.Header) {
             tvArrow.text = if (header.isExpanded) "▼" else "▶"
             tvLabel.text = header.label
-            tvCount.text = "%,d items · %s".format(header.count, fmtBytes(header.totalBytes))
+            tvCount.text = formatTypeBreakdown(header.photoCount, header.videoCount, header.pdfCount, header.totalBytes)
             itemView.setOnClickListener { onMonthToggle(header.monthKey) }
         }
     }

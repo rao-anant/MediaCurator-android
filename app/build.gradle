@@ -3,21 +3,43 @@ plugins {
     id 'kotlin-android'
 }
 
+// Load signing credentials from keystore.properties (never committed to git)
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     compileSdk 34
-    namespace 'com.photocurator'
+    namespace 'com.anant.mediacurator'
 
     defaultConfig {
-        applicationId "com.photocurator"
+        applicationId "com.anant.mediacurator"
         minSdk 26
         targetSdk 34
         versionCode 1
         versionName "1.0"
     }
 
+    signingConfigs {
+        release {
+            storeFile     file(keystoreProperties['storeFile']     ?: 'mediacurator.keystore')
+            storePassword       keystoreProperties['storePassword'] ?: ''
+            keyAlias            keystoreProperties['keyAlias']      ?: ''
+            keyPassword         keystoreProperties['keyPassword']   ?: ''
+        }
+    }
+
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
+        }
+        debug {
+            applicationIdSuffix ".debug"
         }
     }
 
@@ -32,6 +54,12 @@ android {
 
     buildFeatures {
         viewBinding true
+    }
+
+    bundle {
+        language { enableSplit = true }
+        density  { enableSplit = true }
+        abi      { enableSplit = true }
     }
 }
 

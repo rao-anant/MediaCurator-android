@@ -1,9 +1,9 @@
-package com.photocurator
+﻿package com.anant.mediacurator
 
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import com.bumptech.glide.Glide
-import com.photocurator.databinding.ActivityPhotoViewerBinding
+import com.anant.mediacurator.databinding.ActivityPhotoViewerBinding
 
 class PhotoViewerActivity : AppCompatActivity() {
     private lateinit var binding: ActivityPhotoViewerBinding
