@@ -54,7 +54,12 @@ Most gallery and file manager apps let you delete what you don't want — but th
 way to track your progress. Come back a week later and you're back to square one, slogging
 through months you've already reviewed. Media Curator solves this: mark a month as done
 and it stays out of your way. Next session, you pick up exactly where you left off.
-That's the difference — what used to drag across many interrupted sessions now moves multiple times faster.
+That's the difference — what used to drag across many interrupted sessions
+now moves multiple times faster.
+
+Note: deleted items are permanently removed from the phone, but hidden months
+are never deleted — you can unhide them back into the app at any time.
+Hidden items remain fully accessible in your phone's default Gallery app.
 
 BROWSE YOUR LIBRARY YOUR WAY
 • See all your photos, videos, and PDFs grouped by month and year
