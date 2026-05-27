@@ -61,6 +61,12 @@ android {
         density  { enableSplit = true }
         abi      { enableSplit = true }
     }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            outputFileName = "mediacurator-${variant.buildType.name}-${defaultConfig.versionName}.apk"
+        }
+    }
 }
 
 dependencies {

@@ -41,13 +41,20 @@ permission. It is the canonical use case in Google's own policy documentation.
 
 ## Store listing — Short description (≤ 80 chars)
 ```
-Browse, curate, and delete your photos, videos & PDFs — all offline.
+Turbocharge curating your photos, videos and PDFs and enjoy the time reclaimed.
 ```
 
 ## Store listing — Full description
 ```
 Media Curator helps you take control of your photo library — without any cloud, accounts,
 or privacy trade-offs. Everything runs locally on your device.
+
+THE PROBLEM WITH EVERY OTHER GALLERY APP
+Most gallery and file manager apps let you delete what you don't want — but they offer no
+way to track your progress. Come back a week later and you're back to square one, slogging
+through months you've already reviewed. Media Curator solves this: mark a month as done
+and it stays out of your way. Next session, you pick up exactly where you left off.
+That's the difference — what used to drag across many interrupted sessions now moves multiple times faster.
 
 BROWSE YOUR LIBRARY YOUR WAY
 • See all your photos, videos, and PDFs grouped by month and year
