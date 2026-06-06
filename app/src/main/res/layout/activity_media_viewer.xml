@@ -30,6 +30,14 @@
             android:src="@drawable/ic_share"
             android:contentDescription="Share" />
 
+        <ImageButton
+            android:id="@+id/btnOpenInGallery"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_open_gallery"
+            android:contentDescription="Open in Gallery" />
+
         <Space
             android:layout_width="0dp"
             android:layout_height="wrap_content"

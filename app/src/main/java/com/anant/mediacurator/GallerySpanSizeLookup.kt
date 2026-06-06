@@ -10,8 +10,9 @@ class GallerySpanSizeLookup(
     override fun getSpanSize(position: Int): Int {
         val item = adapter.currentList.getOrNull(position) ?: return 1
         
-        // Year headers, month headers, and footers always take the full width
-        if (item is GalleryItem.YearHeader || item is GalleryItem.Header || item is GalleryItem.Footer) {
+        // Year headers, month headers, sub-headers, and footers always take the full width
+        if (item is GalleryItem.YearHeader || item is GalleryItem.Header ||
+            item is GalleryItem.SubHeader  || item is GalleryItem.Footer) {
             return spanCount
         }
 

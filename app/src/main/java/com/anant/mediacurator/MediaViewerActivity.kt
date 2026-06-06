@@ -120,6 +120,25 @@ class MediaViewerActivity : AppCompatActivity() {
         // deletionCompletedEvent no longer closes the viewer — the flatMediaItems
         // observer advances to the next item and closes only when the list is empty.
 
+        binding.btnOpenInGallery.setOnClickListener {
+            if (::adapter.isInitialized && binding.viewPager.currentItem < adapter.itemCount) {
+                val item = adapter.getItem(binding.viewPager.currentItem)
+                val mime = when (item.type) {
+                    MediaType.IMAGE -> "image/*"
+                    MediaType.VIDEO -> "video/*"
+                    MediaType.PDF   -> return@setOnClickListener
+                }
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(Uri.parse(item.uri), mime)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    })
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(this, "No gallery app found", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
         binding.btnShare.setOnClickListener {
             if (::adapter.isInitialized && binding.viewPager.currentItem < adapter.itemCount) {
                 val currentItem = adapter.getItem(binding.viewPager.currentItem)
@@ -156,6 +175,7 @@ class MediaViewerActivity : AppCompatActivity() {
     private fun updateUIForItem(item: MediaItem) {
         val isVideo = item.type == MediaType.VIDEO
         binding.videoScrubber.isVisible = isVideo
+        binding.btnOpenInGallery.isVisible = item.type != MediaType.PDF
         
         stopProgressUpdate()
         if (isVideo) {
@@ -279,10 +299,15 @@ class MediaViewerActivity : AppCompatActivity() {
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
                             try {
-                                binding.root.context.startActivity(
-                                    Intent.createChooser(openIntent, "Open PDF with")
-                                )
-                            } catch (e: Exception) { /* no PDF viewer installed */ }
+                                binding.root.context.startActivity(openIntent)
+                            } catch (e: Exception) {
+                                // No default set yet — fall back to chooser so user can pick and remember
+                                try {
+                                    binding.root.context.startActivity(
+                                        Intent.createChooser(openIntent, "Open PDF with")
+                                    )
+                                } catch (e2: Exception) { /* no PDF viewer installed */ }
+                            }
                         }
                     }
                 }

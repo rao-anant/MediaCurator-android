@@ -45,6 +45,16 @@ class MainActivity : AppCompatActivity() {
     private var offeredOneClickDelete = false
     private var offeredAllFilesAccess = false  // show the PDF-access prompt only once per session
 
+    // Jump toggle: remembers the two positions so the swap FAB can bounce back and forth
+    private var jumpAMonthKey: String? = null  // where we came FROM
+    private var jumpBMonthKey: String? = null  // where we jumped TO
+
+    // Pending move state — held across the createWriteRequest consent dialog
+    private var pendingMoveItems:       List<MediaItem>? = null
+    private var pendingMovePath:        String?          = null
+    private var pendingMoveTargetName:  String?          = null
+    private var pendingMoveSkipped:     Int              = 0
+
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
             if (grants.values.any { it }) {
@@ -57,6 +67,23 @@ class MainActivity : AppCompatActivity() {
     private val deleteLauncher =
         registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
             viewModel.onDeletePermissionResult(result.resultCode == Activity.RESULT_OK)
+        }
+
+    private val moveLauncher =
+        registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                val items      = pendingMoveItems      ?: return@registerForActivityResult
+                val path       = pendingMovePath       ?: return@registerForActivityResult
+                val targetName = pendingMoveTargetName ?: return@registerForActivityResult
+                val skipped    = pendingMoveSkipped
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) { moveItemsDirect(items, path) }
+                    showMoveToast(items.size, skipped, targetName)
+                    clearPendingMove()
+                    exitSelectionMode()
+                    viewModel.loadMedia(forceRefresh = true)
+                }
+            }
         }
 
     private val manageMediaLauncher =
@@ -119,6 +146,20 @@ class MainActivity : AppCompatActivity() {
             binding.appBarLayout.setExpanded(true, true)
         }
 
+        binding.fabJumpSwap.setOnClickListener {
+            val target = jumpAMonthKey ?: return@setOnClickListener
+            // Swap A and B so next tap goes back the other way
+            jumpAMonthKey = jumpBMonthKey
+            jumpBMonthKey = target
+            val pos = adapter.currentList.indexOfFirst {
+                it is GalleryItem.Header && it.monthKey == target
+            }
+            if (pos >= 0) {
+                (binding.recyclerView.layoutManager as? LinearLayoutManager)
+                    ?.scrollToPositionWithOffset(pos, 0)
+            }
+        }
+
         binding.recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                 val layoutManager = recyclerView.layoutManager as? LinearLayoutManager
@@ -178,8 +219,9 @@ class MainActivity : AppCompatActivity() {
     private fun setupRecyclerView() {
         val spanCount = 4
         adapter = GalleryAdapter(
-            onYearToggle  = { year     -> viewModel.toggleYearExpansion(year) },
-            onMonthToggle = { monthKey -> viewModel.toggleMonthExpansion(monthKey) },
+            onYearToggle     = { year     -> viewModel.toggleYearExpansion(year) },
+            onMonthToggle    = { monthKey -> viewModel.toggleMonthExpansion(monthKey) },
+            onSubGroupToggle = { subKey   -> viewModel.toggleSubGroupExpansion(subKey) },
             onMediaClick  = { item ->
                 if (item.type == MediaType.PDF) {
                     val uri = Uri.parse(item.uri)
@@ -220,6 +262,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupSelectionBar() {
+        binding.btnMoveSelected.setOnClickListener {
+            val selected = adapter.getSelectedItems()
+            if (selected.isEmpty()) { showToast("No items selected"); return@setOnClickListener }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                showToast("Move requires Android 10+"); return@setOnClickListener
+            }
+            showAlbumPicker(selected)
+        }
         binding.btnDeleteSelected.setOnClickListener {
             val selected = adapter.getSelectedItems()
             if (selected.isEmpty()) { showToast("No items selected"); return@setOnClickListener }
@@ -388,7 +438,7 @@ class MainActivity : AppCompatActivity() {
                 binding.restoreLayout.isVisible = false
                 binding.tvHiddenCount.isVisible = false
             } else {
-                binding.tvHiddenCount.text = "${groups.size} hidden"
+                binding.tvHiddenCount.text = "${groups.sumOf { it.items.size }} hidden"
                 binding.tvHiddenCount.isVisible = true
                 updateRestoreLayoutVisibility()
 
@@ -415,18 +465,38 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        viewModel.totalPhotos.observe(this) { binding.tvTotalPhotos.text = "Photos: $it" }
-        viewModel.totalVideos.observe(this) { binding.tvTotalVideos.text = "Videos: $it" }
-        viewModel.totalPdfs.observe(this)   {
-            binding.tvTotalPdfs.text = "PDFs: $it"
-            binding.tvTotalPdfs.isVisible = it > 0
+        viewModel.scrollToMonthKey.observe(this) { key ->
+            if (key == null) return@observe
+            viewModel.clearScrollToMonth()
+            // Capture where we are NOW before jumping
+            jumpAMonthKey = currentVisibleMonthKey()
+            jumpBMonthKey = key
+            binding.recyclerView.post {
+                val pos = adapter.currentList.indexOfFirst {
+                    it is GalleryItem.Header && it.monthKey == key
+                }
+                if (pos >= 0) {
+                    (binding.recyclerView.layoutManager as? LinearLayoutManager)
+                        ?.scrollToPositionWithOffset(pos, 0)
+                }
+                binding.fabJumpSwap.isVisible = jumpAMonthKey != null
+            }
         }
 
         viewModel.mediaStats.observe(this) { stats ->
             if (stats == null) return@observe
-            binding.chipPhoto.text = "Photos (${stats.visiblePhotos})"
-            binding.chipVideo.text = "Videos (${stats.visibleVideos})"
-            binding.chipPdf.text   = "PDFs (${stats.visiblePdfs})"
+            // Stats bar — totals (visible + hidden) with sizes
+            val totalPhotoBytes = stats.visiblePhotoBytes + stats.hiddenPhotoBytes
+            val totalVideoBytes = stats.visibleVideoBytes + stats.hiddenVideoBytes
+            val totalPdfBytes   = stats.visiblePdfBytes   + stats.hiddenPdfBytes
+            binding.tvTotalPhotos.text = "📷 ${stats.totalPhotos} · ${fmtSize(totalPhotoBytes)}"
+            binding.tvTotalVideos.text = "🎬 ${stats.totalVideos} · ${fmtSize(totalVideoBytes)}"
+            binding.tvTotalPdfs.text   = "PDF ${stats.totalPdfs} · ${fmtSize(totalPdfBytes)}"
+            binding.tvTotalPdfs.isVisible = stats.totalPdfs > 0
+            // Chips — visible counts with sizes
+            binding.chipPhoto.text = "Photos (${stats.visiblePhotos} - ${fmtSize(stats.visiblePhotoBytes)})"
+            binding.chipVideo.text = "Videos (${stats.visibleVideos} - ${fmtSize(stats.visibleVideoBytes)})"
+            binding.chipPdf.text   = "PDFs (${stats.visiblePdfs} - ${fmtSize(stats.visiblePdfBytes)})"
         }
 
         viewModel.autoRestorePrompt.observe(this) { months ->
@@ -709,12 +779,14 @@ class MainActivity : AppCompatActivity() {
         val list      = adapter.currentList
         val firstItem = list.getOrNull(firstPos)
 
-        // Walk back to find the nearest YearHeader and Header above the viewport top
+        // Walk back to find nearest YearHeader, Header, and SubHeader above the viewport top
         var yearCtx:  GalleryItem.YearHeader? = null
         var monthCtx: GalleryItem.Header?     = null
+        var subCtx:   GalleryItem.SubHeader?  = null
         for (i in firstPos downTo 0) {
             val item = list.getOrNull(i) ?: break
-            if (monthCtx == null && item is GalleryItem.Header) monthCtx = item
+            if (subCtx   == null && item is GalleryItem.SubHeader) subCtx   = item
+            if (monthCtx == null && item is GalleryItem.Header)    monthCtx = item
             if (item is GalleryItem.YearHeader) { yearCtx = item; break }
         }
 
@@ -726,31 +798,41 @@ class MainActivity : AppCompatActivity() {
 
         binding.stickyHeader.isVisible = true
 
-        // Month row — only when inside a month (month header itself has scrolled off top)
+        // Sub row — only when inside a sub-group (sub-header itself has scrolled off top)
+        val showSub   = subCtx   != null && firstItem !is GalleryItem.SubHeader && firstItem !is GalleryItem.Header
+        // Month row — when inside a month and sub row is not shown OR when sub-header is the first visible item
         val showMonth = monthCtx != null && firstItem !is GalleryItem.Header
+        binding.stickySubRow.isVisible   = showSub
         binding.stickyMonthRow.isVisible = showMonth
 
-        // Year row — always shown while sticky is visible.
-        // Behaviour: "go up one level."
-        //   • Inside an open month  → tap closes the MONTH, keeping the year expanded
-        //   • Browsing month headers → tap closes the YEAR
+        // Year row — always shown; tap behaviour: go up one level
         binding.tvStickyYearArrow.text = if (yearCtx.isExpanded) "▼" else "▶"
         binding.tvStickyYear.text      = yearCtx.year.toString()
         binding.tvStickyYearStats.text = GalleryAdapter.formatTypeBreakdown(yearCtx.photoCount, yearCtx.videoCount, yearCtx.pdfCount, yearCtx.totalBytes)
         val capturedYear = yearCtx.year
-        if (showMonth && monthCtx != null) {
-            val capturedKey = monthCtx.monthKey
-            binding.stickyYearRow.setOnClickListener { viewModel.toggleMonthExpansion(capturedKey) }
+        if (monthCtx != null && (showMonth || showSub)) {
+            val capturedMonthKey = monthCtx.monthKey
+            binding.stickyYearRow.setOnClickListener { viewModel.toggleMonthExpansion(capturedMonthKey) }
         } else {
             binding.stickyYearRow.setOnClickListener { viewModel.toggleYearExpansion(capturedYear) }
         }
 
+        // Month row — tap collapses the month
         if (showMonth && monthCtx != null) {
             binding.tvStickyMonthArrow.text = if (monthCtx.isExpanded) "▼" else "▶"
             binding.tvStickyMonth.text      = monthCtx.label
             binding.tvStickyMonthStats.text = GalleryAdapter.formatTypeBreakdown(monthCtx.photoCount, monthCtx.videoCount, monthCtx.pdfCount, monthCtx.totalBytes)
-            val capturedKey = monthCtx.monthKey
-            binding.stickyMonthRow.setOnClickListener { viewModel.toggleMonthExpansion(capturedKey) }
+            val capturedMonthKey = monthCtx.monthKey
+            binding.stickyMonthRow.setOnClickListener { viewModel.toggleMonthExpansion(capturedMonthKey) }
+        }
+
+        // Sub row — tap collapses the sub-group
+        if (showSub && subCtx != null) {
+            binding.tvStickySubArrow.text = if (subCtx.isExpanded) "▼" else "▶"
+            binding.tvStickySubLabel.text = subCtx.label
+            binding.tvStickySubStats.text = GalleryAdapter.formatTypeBreakdown(subCtx.photoCount, subCtx.videoCount, subCtx.pdfCount, subCtx.totalBytes)
+            val capturedSubKey = subCtx.subKey
+            binding.stickySubRow.setOnClickListener { viewModel.toggleSubGroupExpansion(capturedSubKey) }
         }
     }
 
@@ -824,17 +906,139 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ── Move to album ─────────────────────────────────────────────────────────
+
+    private fun showAlbumPicker(items: List<MediaItem>) {
+        lifecycleScope.launch {
+            val albums = fetchAlbums()
+            if (albums.isEmpty()) { showToast("No albums found"); return@launch }
+            val names = albums.keys.toTypedArray()
+            androidx.appcompat.app.AlertDialog.Builder(this@MainActivity)
+                .setTitle("Move to album")
+                .setItems(names) { _, which ->
+                    val targetName = names[which]
+                    val targetPath = albums[targetName] ?: return@setItems
+                    moveToAlbum(items, targetName, targetPath)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+    }
+
+    private suspend fun fetchAlbums(): LinkedHashMap<String, String> = withContext(Dispatchers.IO) {
+        val result = LinkedHashMap<String, String>()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return@withContext result
+        val projection = arrayOf(
+            MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+            MediaStore.MediaColumns.RELATIVE_PATH
+        )
+        contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            projection, null, null,
+            "${MediaStore.Images.Media.BUCKET_DISPLAY_NAME} ASC"
+        )?.use { cursor ->
+            val bucketCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+            val pathCol   = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(bucketCol) ?: continue
+                val path = cursor.getString(pathCol)   ?: continue
+                if (!result.containsKey(name)) result[name] = path
+            }
+        }
+        result
+    }
+
+    private fun moveToAlbum(items: List<MediaItem>, targetName: String, targetPath: String) {
+        val toMove  = items.filter {
+            it.relativePath.trimEnd('/').lowercase() != targetPath.trimEnd('/').lowercase()
+        }
+        val skipped = items.size - toMove.size
+        if (toMove.isEmpty()) { showToast("All items already in $targetName"); return }
+
+        pendingMoveItems      = toMove
+        pendingMovePath       = targetPath
+        pendingMoveTargetName = targetName
+        pendingMoveSkipped    = skipped
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val uris = toMove.map { Uri.parse(it.uri) }
+                val pi   = MediaStore.createWriteRequest(contentResolver, uris)
+                moveLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+            } catch (e: Exception) {
+                showToast("Move failed: ${e.message}")
+                clearPendingMove()
+            }
+        } else {
+            // API 29: WRITE_EXTERNAL_STORAGE covers direct update
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) { moveItemsDirect(toMove, targetPath) }
+                showMoveToast(toMove.size, skipped, targetName)
+                clearPendingMove()
+                exitSelectionMode()
+                viewModel.loadMedia(forceRefresh = true)
+            }
+        }
+    }
+
+    private fun moveItemsDirect(items: List<MediaItem>, targetPath: String) {
+        for (item in items) {
+            try {
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, targetPath)
+                }
+                contentResolver.update(Uri.parse(item.uri), values, null, null)
+            } catch (e: Exception) {
+                android.util.Log.e("Move", "Failed to move ${item.displayName}", e)
+            }
+        }
+    }
+
+    private fun showMoveToast(moved: Int, skipped: Int, targetName: String) {
+        val msg = if (skipped > 0)
+            "Moved $moved · $skipped already in $targetName"
+        else
+            "Moved $moved item${if (moved == 1) "" else "s"} to $targetName"
+        showToast(msg)
+    }
+
+    private fun clearPendingMove() {
+        pendingMoveItems      = null
+        pendingMovePath       = null
+        pendingMoveTargetName = null
+        pendingMoveSkipped    = 0
+    }
+
+    /** Returns the monthKey of the Header at or just above the first visible item. */
+    private fun currentVisibleMonthKey(): String? {
+        val lm = binding.recyclerView.layoutManager as? LinearLayoutManager ?: return null
+        val firstPos = lm.findFirstVisibleItemPosition().takeIf { it >= 0 } ?: return null
+        val list = adapter.currentList
+        for (i in firstPos downTo 0) {
+            val item = list.getOrNull(i)
+            if (item is GalleryItem.Header) return item.monthKey
+        }
+        return null
+    }
+
     private fun showToast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+
+    private fun fmtSize(b: Long): String = when {
+        b >= 1_073_741_824L -> "%.1fG".format(b / 1_073_741_824.0)
+        b >= 1_048_576L     -> "%.1fM".format(b / 1_048_576.0)
+        b >= 1_024L         -> "%.1fK".format(b / 1_024.0)
+        else                -> "${b}B"
+    }
 
     // ── Help ──────────────────────────────────────────────────────────────────
 
     private fun showHelpDialog() {
         val text = """
-Systematic, month-by-month curation of a large media library - all without losing your place. This is the key feature of the app.
+Most gallery apps let you delete — but none of them remember what you’ve already reviewed. Come back a week later and you’re staring at the same pile from the beginning (or end, depending on your sorting order).
 
-Most gallery apps show everything at once. This one lets you work through your library like a task list: open a year, open a month, delete what you don’t want, then hide the month when you’re done.
+Media Curator fixes this. Work through a month, mark it as done, and it steps out of your way. Next session you pick up exactly where you left off — every time. Result? A super-charged gallery curation experience.
 
-Hidden items stay out of the way within the app but aren’t deleted - they remain fully accessible in your phone’s regular gallery. Should you wish, you can unhide them anytime you want as well. Auto-backup preserves your progress across reinstalls and device transfers.
+Months you hide are never deleted — they stay fully accessible in your phone’s regular gallery, and you can unhide them here anytime.
 
 Built for people with years of accumulated photos, videos, and PDFs who want to clean up methodically - not just browse.
 ─────────────────────────────

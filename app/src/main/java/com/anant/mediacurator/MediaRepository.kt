@@ -73,6 +73,7 @@ class MediaRepository(private val context: Context) {
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             projection.add(MediaStore.MediaColumns.DURATION)
+            projection.add(MediaStore.MediaColumns.RELATIVE_PATH)
         }
 
         try {
@@ -83,7 +84,8 @@ class MediaRepository(private val context: Context) {
                 val daCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
                 val dmCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
                 val dtCol = cursor.getColumnIndex("datetaken")
-                val durCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) cursor.getColumnIndex(MediaStore.MediaColumns.DURATION) else -1
+                val durCol     = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) cursor.getColumnIndex(MediaStore.MediaColumns.DURATION) else -1
+                val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH) else -1
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idCol)
@@ -92,12 +94,13 @@ class MediaRepository(private val context: Context) {
                     val dt = if (dtCol != -1) cursor.getLong(dtCol) else 0L
                     val da = cursor.getLong(daCol) * 1000
                     val dm = cursor.getLong(dmCol) * 1000
-                    val dur = if (durCol != -1) cursor.getLong(durCol) else 0L
-                    
+                    val dur     = if (durCol     != -1) cursor.getLong(durCol)    else 0L
+                    val relPath = if (relPathCol != -1) cursor.getString(relPathCol) ?: "" else ""
+
                     val bestDate = resolveBestDate(name, dt, dm, da)
                     val uri = ContentUris.withAppendedId(collectionUri, id).toString()
-                    
-                    mediaList.add(MediaItem(id, uri, "external", bestDate, name, size, type, dur))
+
+                    mediaList.add(MediaItem(id, uri, "external", bestDate, name, size, type, dur, relPath))
                 }
             }
         } catch (e: Exception) {

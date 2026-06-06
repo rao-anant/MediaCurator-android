@@ -122,16 +122,20 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var pendingScrollToTop = false
     @Volatile private var pendingScrollToMonthKey: String? = null
 
-    // Which years / months are currently expanded in the tree view.
+    // Which years / months / sub-groups are currently expanded in the tree view.
     // Thread-safe: reads happen on IO thread (via snapshot), writes on main thread.
-    private val expandedYears  = Collections.synchronizedSet(mutableSetOf<Int>())
-    private val expandedMonths = Collections.synchronizedSet(mutableSetOf<String>())
+    private val expandedYears     = Collections.synchronizedSet(mutableSetOf<Int>())
+    private val expandedMonths    = Collections.synchronizedSet(mutableSetOf<String>())
+    private val expandedSubGroups = Collections.synchronizedSet(mutableSetOf<String>())
 
     init {
         _sortMode.value = prefs.getSortMode()
         _includePhoto.value = prefs.isIncludePhoto()
         _includeVideo.value = prefs.isIncludeVideo()
         _includePdf.value = prefs.isIncludePdf()
+        expandedYears.addAll(prefs.getExpandedYears())
+        expandedMonths.addAll(prefs.getExpandedMonths())
+        expandedSubGroups.addAll(prefs.getExpandedSubGroups())
         // Silently restore hidden-month state from the auto-backup if prefs are empty
         // (covers fresh install, app-data clear, reinstall after uninstall).
         checkAndAutoRestore()
@@ -171,12 +175,21 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleYearExpansion(year: Int) {
         if (expandedYears.contains(year)) expandedYears.remove(year) else expandedYears.add(year)
+        prefs.saveExpandedYears(expandedYears.toSet())
         structuralVersion++
         loadMedia(forceRefresh = false)
     }
 
     fun toggleMonthExpansion(monthKey: String) {
         if (expandedMonths.contains(monthKey)) expandedMonths.remove(monthKey) else expandedMonths.add(monthKey)
+        prefs.saveExpandedMonths(expandedMonths.toSet())
+        structuralVersion++
+        loadMedia(forceRefresh = false)
+    }
+
+    fun toggleSubGroupExpansion(subKey: String) {
+        if (expandedSubGroups.contains(subKey)) expandedSubGroups.remove(subKey) else expandedSubGroups.add(subKey)
+        prefs.saveExpandedSubGroups(expandedSubGroups.toSet())
         structuralVersion++
         loadMedia(forceRefresh = false)
     }
@@ -305,8 +318,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                     yearToMonths.getOrPut(group.year) { mutableListOf() }.add(group)
                 }
 
-                val expandedYearsSnapshot  = expandedYears.toSet()
-                val expandedMonthsSnapshot = expandedMonths.toSet()
+                val expandedYearsSnapshot     = expandedYears.toSet()
+                val expandedMonthsSnapshot    = expandedMonths.toSet()
+                val expandedSubGroupsSnapshot = expandedSubGroups.toSet()
 
                 val treeItems = ArrayList<GalleryItem>()
                 for ((year, months) in yearToMonths) {
@@ -327,8 +341,55 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                             val isMonthExpanded = expandedMonthsSnapshot.contains(group.key)
                             treeItems.add(GalleryItem.Header(group.key, group.label, monthItemCount, monthBytes, isMonthExpanded, monthPhotos, monthVideos, monthPdfs, currentVersion))
                             if (isMonthExpanded) {
-                                group.items.forEachIndexed { index, mediaItem ->
-                                    treeItems.add(GalleryItem.Media(mediaItem, group.key, index, null, currentVersion))
+                                val waItems  = group.items.filter { it.isWhatsApp }
+                                val camItems = group.items.filter { !it.isWhatsApp }
+
+                                if (waItems.isEmpty()) {
+                                    // No WhatsApp items — flat layout (current behavior)
+                                    group.items.forEachIndexed { index, mediaItem ->
+                                        treeItems.add(GalleryItem.Media(mediaItem, group.key, index, null, currentVersion))
+                                    }
+                                } else {
+                                    val camKey = "${group.key}:cam"
+                                    val waKey  = "${group.key}:wa"
+                                    val isCamExpanded = expandedSubGroupsSnapshot.contains(camKey)
+                                    val isWaExpanded  = expandedSubGroupsSnapshot.contains(waKey)
+
+                                    if (camItems.isNotEmpty()) {
+                                        treeItems.add(GalleryItem.SubHeader(
+                                            subKey = camKey, monthKey = group.key,
+                                            label = "Camera & Others",
+                                            count = camItems.size,
+                                            totalBytes = camItems.sumOf { it.size },
+                                            isExpanded = isCamExpanded,
+                                            photoCount = camItems.count { it.type == MediaType.IMAGE },
+                                            videoCount = camItems.count { it.type == MediaType.VIDEO },
+                                            pdfCount   = camItems.count { it.type == MediaType.PDF },
+                                            structuralVersion = currentVersion
+                                        ))
+                                        if (isCamExpanded) {
+                                            camItems.forEachIndexed { index, mediaItem ->
+                                                treeItems.add(GalleryItem.Media(mediaItem, group.key, index, null, currentVersion))
+                                            }
+                                        }
+                                    }
+
+                                    treeItems.add(GalleryItem.SubHeader(
+                                        subKey = waKey, monthKey = group.key,
+                                        label = "WhatsApp",
+                                        count = waItems.size,
+                                        totalBytes = waItems.sumOf { it.size },
+                                        isExpanded = isWaExpanded,
+                                        photoCount = waItems.count { it.type == MediaType.IMAGE },
+                                        videoCount = waItems.count { it.type == MediaType.VIDEO },
+                                        pdfCount   = waItems.count { it.type == MediaType.PDF },
+                                        structuralVersion = currentVersion
+                                    ))
+                                    if (isWaExpanded) {
+                                        waItems.forEachIndexed { index, mediaItem ->
+                                            treeItems.add(GalleryItem.Media(mediaItem, group.key, index, null, currentVersion))
+                                        }
+                                    }
                                 }
                                 treeItems.add(GalleryItem.Footer(group.key, currentVersion))
                             }

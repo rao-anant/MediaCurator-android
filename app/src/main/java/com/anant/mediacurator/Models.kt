@@ -32,8 +32,11 @@ data class MediaItem(
     val displayName: String,
     val size: Long,
     val type: MediaType,
-    val duration: Long = 0
-) : Serializable
+    val duration: Long = 0,
+    val relativePath: String = ""
+) : Serializable {
+    val isWhatsApp: Boolean get() = relativePath.contains("whatsapp", ignoreCase = true)
+}
 
 data class MonthGroup(
     val year: Int,
@@ -78,6 +81,19 @@ sealed class GalleryItem {
         // Non-null only in flat (SIZE_ABSOLUTE) mode — shown as a badge on the thumbnail
         // so the user knows which month each item belongs to without tree headers.
         val dateLabel: String? = null,
+        override val structuralVersion: Int = 0
+    ) : GalleryItem()
+
+    data class SubHeader(
+        val subKey: String,       // e.g. "2024-03:cam" or "2024-03:wa"
+        val monthKey: String,
+        val label: String,        // "Camera & Others" or "WhatsApp"
+        val count: Int,
+        val totalBytes: Long = 0L,
+        val isExpanded: Boolean = false,
+        val photoCount: Int = 0,
+        val videoCount: Int = 0,
+        val pdfCount: Int = 0,
         override val structuralVersion: Int = 0
     ) : GalleryItem()
 

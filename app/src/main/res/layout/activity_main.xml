@@ -39,40 +39,51 @@
             android:gravity="center_vertical"
             app:layout_scrollFlags="scroll|enterAlways">
 
-            <TextView
-                android:id="@+id/tvTotalPhotos"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Photos: --"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:textColor="@android:color/white" />
-
-            <TextView
-                android:id="@+id/tvTotalVideos"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:text="Videos: --"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:textColor="@android:color/white" />
-
-            <TextView
-                android:id="@+id/tvTotalPdfs"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="PDFs: --"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:textColor="@android:color/white"
-                android:visibility="gone"
-                android:layout_marginStart="16dp" />
-
-            <View
+            <!-- Stats group: shrinks if needed so hidden count always shows -->
+            <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvTotalPhotos"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Photos: --"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="@android:color/white"
+                    android:singleLine="true"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/tvTotalVideos"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:text="Videos: --"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="@android:color/white"
+                    android:singleLine="true"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/tvTotalPdfs"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="PDFs: --"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="@android:color/white"
+                    android:visibility="gone"
+                    android:layout_marginStart="10dp"
+                    android:singleLine="true"
+                    android:ellipsize="end" />
+
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/tvHiddenCount"
@@ -80,7 +91,9 @@
                 android:layout_height="wrap_content"
                 android:textSize="13sp"
                 android:textColor="@color/primary"
+                android:layout_marginStart="8dp"
                 android:paddingEnd="10dp"
+                android:singleLine="true"
                 android:visibility="gone" />
 
             <TextView
@@ -123,7 +136,11 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Photo"
-                    android:checked="true" />
+                    android:textSize="12sp"
+                    android:checked="true"
+                    app:chipMinHeight="28dp"
+                    app:chipStartPadding="8dp"
+                    app:chipEndPadding="8dp" />
 
                 <com.google.android.material.chip.Chip
                     android:id="@+id/chipVideo"
@@ -131,7 +148,11 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Video"
-                    android:checked="true" />
+                    android:textSize="12sp"
+                    android:checked="true"
+                    app:chipMinHeight="28dp"
+                    app:chipStartPadding="8dp"
+                    app:chipEndPadding="8dp" />
 
                 <com.google.android.material.chip.Chip
                     android:id="@+id/chipPdf"
@@ -139,7 +160,11 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="PDF"
-                    android:checked="true" />
+                    android:textSize="12sp"
+                    android:checked="true"
+                    app:chipMinHeight="28dp"
+                    app:chipStartPadding="8dp"
+                    app:chipEndPadding="8dp" />
 
             </com.google.android.material.chip.ChipGroup>
         </LinearLayout>
@@ -333,21 +358,81 @@
                         android:textColor="@color/on_surface_variant" />
                 </LinearLayout>
             </LinearLayout>
+
+            <!-- Sticky sub-group row (Camera & Others / WhatsApp) -->
+            <LinearLayout
+                android:id="@+id/stickySubRow"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@color/background"
+                android:paddingStart="44dp"
+                android:paddingEnd="12dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tvStickySubArrow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="▼"
+                    android:textSize="10sp"
+                    android:textColor="@color/primary"
+                    android:layout_marginEnd="8dp" />
+
+                <TextView
+                    android:id="@+id/tvStickySubLabel"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/on_surface" />
+
+                <TextView
+                    android:id="@+id/tvStickySubStats"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:textColor="@color/on_surface_variant" />
+
+            </LinearLayout>
         </LinearLayout>
 
     </FrameLayout>
 
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/fabScrollToTop"
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
-        android:src="@android:drawable/arrow_up_float"
-        android:visibility="gone"
-        app:tint="@android:color/white"
-        app:backgroundTint="@color/primary"
-        android:contentDescription="Scroll to top" />
+        android:orientation="vertical"
+        android:gravity="center_horizontal">
+
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/fabJumpSwap"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:src="@drawable/ic_swap"
+            android:visibility="gone"
+            app:backgroundTint="@color/surface_variant"
+            app:fabSize="mini"
+            android:contentDescription="Jump to other position" />
+
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/fabScrollToTop"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:src="@android:drawable/arrow_up_float"
+            android:visibility="gone"
+            app:tint="@android:color/white"
+            app:backgroundTint="@color/primary"
+            android:contentDescription="Scroll to top" />
+
+    </LinearLayout>
 
     <ProgressBar
         android:id="@+id/progressBar"
@@ -387,6 +472,13 @@
             android:textStyle="bold"
             android:textColor="@color/on_surface"
             android:text="0 selected" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnMoveSelected"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Move"
+            android:layout_marginEnd="8dp" />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnDeleteSelected"
             style="@style/Widget.Material3.Button"

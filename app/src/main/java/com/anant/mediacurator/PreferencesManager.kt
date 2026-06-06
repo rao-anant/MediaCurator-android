@@ -41,6 +41,25 @@ class PreferencesManager(context: Context) {
         return if (prefs.getBoolean(KEY_SORT_ASC, true)) SortMode.DATE_OLDEST else SortMode.DATE_NEWEST
     }
 
+    fun saveExpandedYears(years: Set<Int>) {
+        prefs.edit().putStringSet(KEY_EXPANDED_YEARS, years.map { it.toString() }.toSet()).apply()
+    }
+    fun getExpandedYears(): Set<Int> =
+        (prefs.getStringSet(KEY_EXPANDED_YEARS, emptySet()) ?: emptySet())
+            .mapNotNull { it.toIntOrNull() }.toSet()
+
+    fun saveExpandedMonths(months: Set<String>) {
+        prefs.edit().putStringSet(KEY_EXPANDED_MONTHS, months).apply()
+    }
+    fun getExpandedMonths(): Set<String> =
+        prefs.getStringSet(KEY_EXPANDED_MONTHS, emptySet()) ?: emptySet()
+
+    fun saveExpandedSubGroups(subGroups: Set<String>) {
+        prefs.edit().putStringSet(KEY_EXPANDED_SUBGROUPS, subGroups).apply()
+    }
+    fun getExpandedSubGroups(): Set<String> =
+        prefs.getStringSet(KEY_EXPANDED_SUBGROUPS, emptySet()) ?: emptySet()
+
     fun saveIncludePhoto(include: Boolean) {
         prefs.edit().putBoolean(KEY_INCLUDE_PHOTO, include).apply()
     }
@@ -72,5 +91,8 @@ class PreferencesManager(context: Context) {
         private const val KEY_INCLUDE_PHOTO = "include_photo"
         private const val KEY_INCLUDE_VIDEO = "include_video"
         private const val KEY_INCLUDE_PDF = "include_pdf"
+        private const val KEY_EXPANDED_YEARS     = "expanded_years"
+        private const val KEY_EXPANDED_MONTHS    = "expanded_months"
+        private const val KEY_EXPANDED_SUBGROUPS = "expanded_subgroups"
     }
 }

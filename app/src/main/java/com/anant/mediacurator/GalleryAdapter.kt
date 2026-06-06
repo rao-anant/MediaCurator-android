@@ -22,14 +22,16 @@ class GalleryAdapter(
     private val onMonthHide: (MonthGroup) -> Unit,
     private val onYearToggle: (Int) -> Unit,
     private val onMonthToggle: (String) -> Unit,
+    private val onSubGroupToggle: (String) -> Unit,
     private val onSelectionChanged: (Int) -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
         const val TYPE_YEAR_HEADER = 0
-        const val TYPE_HEADER = 1
-        const val TYPE_MEDIA  = 2
-        const val TYPE_FOOTER = 3
+        const val TYPE_HEADER      = 1
+        const val TYPE_MEDIA       = 2
+        const val TYPE_FOOTER      = 3
+        const val TYPE_SUB_HEADER  = 4
 
         fun fmtBytes(b: Long): String = when {
             b >= 1_073_741_824L -> "%.1f GB".format(b / 1_073_741_824.0)
@@ -94,6 +96,7 @@ class GalleryAdapter(
                                 old is GalleryItem.Header     && new is GalleryItem.Header     -> old.monthKey == new.monthKey
                                 old is GalleryItem.Footer     && new is GalleryItem.Footer     -> old.monthKey == new.monthKey
                                 old is GalleryItem.Media      && new is GalleryItem.Media      -> old.mediaItem.id == new.mediaItem.id
+                                old is GalleryItem.SubHeader  && new is GalleryItem.SubHeader  -> old.subKey == new.subKey
                                 else -> false
                             }
                         }
@@ -151,6 +154,7 @@ class GalleryAdapter(
     override fun getItemViewType(position: Int) = when (currentList[position]) {
         is GalleryItem.YearHeader -> TYPE_YEAR_HEADER
         is GalleryItem.Header     -> TYPE_HEADER
+        is GalleryItem.SubHeader  -> TYPE_SUB_HEADER
         is GalleryItem.Media      -> TYPE_MEDIA
         is GalleryItem.Footer     -> TYPE_FOOTER
     }
@@ -160,6 +164,7 @@ class GalleryAdapter(
         return when (viewType) {
             TYPE_YEAR_HEADER -> YearHeaderViewHolder(inflater.inflate(R.layout.item_year_header, parent, false))
             TYPE_HEADER      -> HeaderViewHolder(inflater.inflate(R.layout.item_month_header, parent, false))
+            TYPE_SUB_HEADER  -> SubHeaderViewHolder(inflater.inflate(R.layout.item_sub_header, parent, false))
             TYPE_FOOTER      -> FooterViewHolder(inflater.inflate(R.layout.item_month_footer, parent, false))
             else             -> MediaViewHolder(inflater.inflate(R.layout.item_photo, parent, false))
         }
@@ -169,6 +174,7 @@ class GalleryAdapter(
         when (val item = currentList[position]) {
             is GalleryItem.YearHeader -> (holder as YearHeaderViewHolder).bind(item)
             is GalleryItem.Header     -> (holder as HeaderViewHolder).bind(item)
+            is GalleryItem.SubHeader  -> (holder as SubHeaderViewHolder).bind(item)
             is GalleryItem.Footer     -> (holder as FooterViewHolder).bind(item)
             is GalleryItem.Media      -> (holder as MediaViewHolder).bind(item)
         }
@@ -197,6 +203,19 @@ class GalleryAdapter(
             tvLabel.text = header.label
             tvCount.text = formatTypeBreakdown(header.photoCount, header.videoCount, header.pdfCount, header.totalBytes)
             itemView.setOnClickListener { onMonthToggle(header.monthKey) }
+        }
+    }
+
+    inner class SubHeaderViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val tvArrow: TextView = itemView.findViewById(R.id.tvSubArrow)
+        private val tvLabel: TextView = itemView.findViewById(R.id.tvSubLabel)
+        private val tvStats: TextView = itemView.findViewById(R.id.tvSubStats)
+
+        fun bind(header: GalleryItem.SubHeader) {
+            tvArrow.text = if (header.isExpanded) "▼" else "▶"
+            tvLabel.text = header.label
+            tvStats.text = formatTypeBreakdown(header.photoCount, header.videoCount, header.pdfCount, header.totalBytes)
+            itemView.setOnClickListener { onSubGroupToggle(header.subKey) }
         }
     }
 
