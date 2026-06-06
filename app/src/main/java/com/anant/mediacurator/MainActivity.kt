@@ -19,8 +19,11 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import android.content.res.ColorStateList
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
+import com.google.android.material.color.MaterialColors
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
@@ -173,7 +176,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupFilterChips() {
         binding.chipPhoto.isChecked = viewModel.includePhoto.value ?: true
         binding.chipVideo.isChecked = viewModel.includeVideo.value ?: true
-        binding.chipPdf.isChecked = viewModel.includePdf.value ?: true
+        binding.chipPdf.isChecked   = viewModel.includePdf.value  ?: true
+        syncChipIcon(binding.chipPhoto, binding.chipPhoto.isChecked, R.drawable.ic_check)
+        syncChipIcon(binding.chipVideo, binding.chipVideo.isChecked, R.drawable.ic_check)
+        syncChipIcon(binding.chipPdf,   binding.chipPdf.isChecked,   R.drawable.ic_pdf)
 
         binding.chipPhoto.setOnCheckedChangeListener { _, isChecked ->
             if (!isChecked && !binding.chipVideo.isChecked && !binding.chipPdf.isChecked) {
@@ -181,6 +187,7 @@ class MainActivity : AppCompatActivity() {
                 showToast("At least one filter must be active")
                 return@setOnCheckedChangeListener
             }
+            syncChipIcon(binding.chipPhoto, isChecked, R.drawable.ic_check)
             viewModel.setIncludePhoto(isChecked)
         }
         binding.chipVideo.setOnCheckedChangeListener { _, isChecked ->
@@ -189,6 +196,7 @@ class MainActivity : AppCompatActivity() {
                 showToast("At least one filter must be active")
                 return@setOnCheckedChangeListener
             }
+            syncChipIcon(binding.chipVideo, isChecked, R.drawable.ic_check)
             viewModel.setIncludeVideo(isChecked)
         }
         binding.chipPdf.setOnCheckedChangeListener { _, isChecked ->
@@ -197,8 +205,22 @@ class MainActivity : AppCompatActivity() {
                 showToast("At least one filter must be active")
                 return@setOnCheckedChangeListener
             }
+            syncChipIcon(binding.chipPdf, isChecked, R.drawable.ic_pdf)
             viewModel.setIncludePdf(isChecked)
         }
+    }
+
+    private fun syncChipIcon(chip: com.google.android.material.chip.Chip, isChecked: Boolean, checkedRes: Int) {
+        val greenColor = ContextCompat.getColor(this, R.color.check_green)
+        val errorColor = MaterialColors.getColor(chip, com.google.android.material.R.attr.colorError)
+        if (isChecked) {
+            chip.chipIcon = AppCompatResources.getDrawable(this, checkedRes)
+            chip.chipIconTint = ColorStateList.valueOf(greenColor)
+        } else {
+            chip.chipIcon = AppCompatResources.getDrawable(this, R.drawable.ic_close)
+            chip.chipIconTint = ColorStateList.valueOf(errorColor)
+        }
+        chip.isChipIconVisible = true
     }
 
     override fun onResume() {
@@ -436,15 +458,12 @@ class MainActivity : AppCompatActivity() {
         viewModel.doneMonthsAvailable.observe(this) { groups ->
             if (groups.isEmpty()) {
                 binding.restoreLayout.isVisible = false
-                binding.tvHiddenCount.isVisible = false
             } else {
-                binding.tvHiddenCount.text = "${groups.sumOf { it.items.size }} hidden"
-                binding.tvHiddenCount.isVisible = true
                 updateRestoreLayoutVisibility()
 
                 // Total hidden count
                 val totalHidden = groups.sumOf { it.items.size }
-                binding.tvHiddenTotal.text = "$totalHidden items hidden"
+                binding.tvHiddenTotal.text = "${fmtCount(totalHidden)} items hidden"
 
                 // Year items with per-year counts and sizes: "2023 (450 / 10 MB)"
                 val yearGroups = groups.groupBy { it.year }
@@ -485,18 +504,13 @@ class MainActivity : AppCompatActivity() {
 
         viewModel.mediaStats.observe(this) { stats ->
             if (stats == null) return@observe
-            // Stats bar — totals (visible + hidden) with sizes
             val totalPhotoBytes = stats.visiblePhotoBytes + stats.hiddenPhotoBytes
             val totalVideoBytes = stats.visibleVideoBytes + stats.hiddenVideoBytes
             val totalPdfBytes   = stats.visiblePdfBytes   + stats.hiddenPdfBytes
-            binding.tvTotalPhotos.text = "📷 ${stats.totalPhotos} · ${fmtSize(totalPhotoBytes)}"
-            binding.tvTotalVideos.text = "🎬 ${stats.totalVideos} · ${fmtSize(totalVideoBytes)}"
-            binding.tvTotalPdfs.text   = "PDF ${stats.totalPdfs} · ${fmtSize(totalPdfBytes)}"
-            binding.tvTotalPdfs.isVisible = stats.totalPdfs > 0
-            // Chips — visible counts with sizes
-            binding.chipPhoto.text = "Photos (${stats.visiblePhotos} - ${fmtSize(stats.visiblePhotoBytes)})"
-            binding.chipVideo.text = "Videos (${stats.visibleVideos} - ${fmtSize(stats.visibleVideoBytes)})"
-            binding.chipPdf.text   = "PDFs (${stats.visiblePdfs} - ${fmtSize(stats.visiblePdfBytes)})"
+            binding.chipPhoto.text = chipText("📷", stats.totalPhotos, stats.hiddenPhotos, totalPhotoBytes)
+            binding.chipVideo.text = chipText("🎬", stats.totalVideos, stats.hiddenVideos, totalVideoBytes)
+            binding.chipPdf.text   = chipText("", stats.totalPdfs,  stats.hiddenPdfs,  totalPdfBytes)
+            binding.chipPdf.isVisible = stats.totalPdfs > 0
         }
 
         viewModel.autoRestorePrompt.observe(this) { months ->
@@ -514,7 +528,6 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
 
-        binding.btnStatsInfo.setOnClickListener { showStatsDialog() }
 
         viewModel.scrollToTopEvent.observe(this) {
             binding.recyclerView.scrollToPosition(0)
@@ -590,6 +603,7 @@ class MainActivity : AppCompatActivity() {
             true
         }
         R.id.action_help -> { showHelpDialog(); true }
+        R.id.action_stats_info -> { showStatsDialog(); true }
         else -> super.onOptionsItemSelected(item)
     }
 
@@ -1026,8 +1040,33 @@ class MainActivity : AppCompatActivity() {
     private fun fmtSize(b: Long): String = when {
         b >= 1_073_741_824L -> "%.1fG".format(b / 1_073_741_824.0)
         b >= 1_048_576L     -> "%.1fM".format(b / 1_048_576.0)
-        b >= 1_024L         -> "%.1fK".format(b / 1_024.0)
+        b >= 1_024L         -> "%.1fk".format(b / 1_024.0)
         else                -> "${b}B"
+    }
+
+    private fun fmtCount(n: Int): String = when {
+        n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0).trimEnd('0').trimEnd('.')
+        n >= 1_000     -> "%.1fk".format(n / 1_000.0).trimEnd('0').trimEnd('.')
+        else           -> "$n"
+    }
+
+    // No-decimal variants for compact chip labels
+    private fun fmtCountShort(n: Int): String = when {
+        n >= 1_000_000 -> "${Math.round(n / 1_000_000.0)}M"
+        n >= 1_000     -> "${Math.round(n / 1_000.0)}k"
+        else           -> "$n"
+    }
+    private fun fmtSizeShort(b: Long): String = when {
+        b >= 1_073_741_824L -> "${Math.round(b / 1_073_741_824.0)}G"
+        b >= 1_048_576L     -> "${Math.round(b / 1_048_576.0)}M"
+        b >= 1_024L         -> "${Math.round(b / 1_024.0)}k"
+        else                -> "${b}B"
+    }
+
+    private fun chipText(icon: String, total: Int, hidden: Int, bytes: Long): String {
+        val counts = if (hidden > 0) "${fmtCountShort(total)}/${fmtCountShort(hidden)}" else fmtCountShort(total)
+        val stats = "$counts · ${fmtSizeShort(bytes)}"
+        return if (icon.isEmpty()) stats else "$icon $stats"
     }
 
     // ── Help ──────────────────────────────────────────────────────────────────

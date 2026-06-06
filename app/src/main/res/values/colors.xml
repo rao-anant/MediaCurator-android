@@ -10,6 +10,7 @@
     <color name="photo_placeholder">#2B2930</color>
     <color name="selection_bar">#2D2B32</color>
     <color name="delete_red">#B3261E</color>
+    <color name="check_green">#4CAF50</color>
 
     <!-- New Yellow Button Colors -->
     <color name="hide_button_yellow">#FBC02D</color>

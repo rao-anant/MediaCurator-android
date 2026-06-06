@@ -770,7 +770,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     fun confirmAutoRestore(months: Set<String>) {
         _autoRestorePrompt.value = null
         prefs.setDoneMonths(months)
-        loadMedia(forceRefresh = false)
+        loadMedia(forceRefresh = true)
     }
 
     /** User tapped "Skip" in the auto-restore confirmation dialog. */

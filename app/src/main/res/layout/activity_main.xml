@@ -25,148 +25,72 @@
             app:title="@string/app_name"
             app:layout_scrollFlags="scroll|enterAlways" />
 
-        <!-- Stats Bar -->
-        <LinearLayout
-            android:id="@+id/statsBar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:paddingTop="10dp"
-            android:paddingBottom="10dp"
-            android:background="@color/surface_variant"
-            android:gravity="center_vertical"
-            app:layout_scrollFlags="scroll|enterAlways">
-
-            <!-- Stats group: shrinks if needed so hidden count always shows -->
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
-
-                <TextView
-                    android:id="@+id/tvTotalPhotos"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Photos: --"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:textColor="@android:color/white"
-                    android:singleLine="true"
-                    android:ellipsize="end" />
-
-                <TextView
-                    android:id="@+id/tvTotalVideos"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:text="Videos: --"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:textColor="@android:color/white"
-                    android:singleLine="true"
-                    android:ellipsize="end" />
-
-                <TextView
-                    android:id="@+id/tvTotalPdfs"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="PDFs: --"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:textColor="@android:color/white"
-                    android:visibility="gone"
-                    android:layout_marginStart="10dp"
-                    android:singleLine="true"
-                    android:ellipsize="end" />
-
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/tvHiddenCount"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="13sp"
-                android:textColor="@color/primary"
-                android:layout_marginStart="8dp"
-                android:paddingEnd="10dp"
-                android:singleLine="true"
-                android:visibility="gone" />
-
-            <TextView
-                android:id="@+id/btnStatsInfo"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="ⓘ"
-                android:textSize="18sp"
-                android:textColor="@android:color/white"
-                android:paddingStart="8dp"
-                android:paddingEnd="4dp"
-                android:clickable="true"
-                android:focusable="true" />
-        </LinearLayout>
-
-        <!-- Settings Bar -->
+        <!-- Single row: filter chips (with counts) + hidden total + ⓘ -->
         <LinearLayout
             android:id="@+id/settingsBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:paddingTop="6dp"
-            android:paddingBottom="6dp"
+            android:paddingStart="6dp"
+            android:paddingEnd="4dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
             android:background="@color/surface"
             app:layout_scrollFlags="scroll|enterAlways">
 
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/filterChipGroup"
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chipPhoto"
+                style="@style/Widget.Material3.Chip.Filter"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                app:singleSelection="false"
-                app:chipSpacingHorizontal="6dp">
+                android:text="📷"
+                android:textSize="13sp"
+                android:checked="true"
+                app:chipMinHeight="32dp"
+                app:chipIconSize="16dp"
+                app:chipStartPadding="4dp"
+                app:chipEndPadding="6dp"
+                app:checkedIconVisible="false" />
 
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipPhoto"
-                    style="@style/Widget.Material3.Chip.Filter"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Photo"
-                    android:textSize="12sp"
-                    android:checked="true"
-                    app:chipMinHeight="28dp"
-                    app:chipStartPadding="8dp"
-                    app:chipEndPadding="8dp" />
+            <View
+                android:layout_width="8dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipVideo"
-                    style="@style/Widget.Material3.Chip.Filter"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Video"
-                    android:textSize="12sp"
-                    android:checked="true"
-                    app:chipMinHeight="28dp"
-                    app:chipStartPadding="8dp"
-                    app:chipEndPadding="8dp" />
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chipVideo"
+                style="@style/Widget.Material3.Chip.Filter"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🎬"
+                android:textSize="13sp"
+                android:checked="true"
+                app:chipMinHeight="32dp"
+                app:chipIconSize="16dp"
+                app:chipStartPadding="4dp"
+                app:chipEndPadding="6dp"
+                app:checkedIconVisible="false" />
 
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipPdf"
-                    style="@style/Widget.Material3.Chip.Filter"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="PDF"
-                    android:textSize="12sp"
-                    android:checked="true"
-                    app:chipMinHeight="28dp"
-                    app:chipStartPadding="8dp"
-                    app:chipEndPadding="8dp" />
+            <View
+                android:layout_width="8dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
-            </com.google.android.material.chip.ChipGroup>
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chipPdf"
+                style="@style/Widget.Material3.Chip.Filter"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textSize="13sp"
+                android:checked="true"
+                app:chipMinHeight="32dp"
+                app:chipIconSize="16dp"
+                app:chipStartPadding="4dp"
+                app:chipEndPadding="6dp"
+                app:checkedIconVisible="false" />
+
         </LinearLayout>
 
         <LinearLayout

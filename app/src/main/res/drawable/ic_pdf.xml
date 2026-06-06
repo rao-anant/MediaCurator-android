@@ -1,19 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Tabler Icons "file-type-pdf" — MIT License https://tabler.io/icons -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="48dp"
-    android:height="48dp"
+    android:width="24dp"
+    android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- Document body -->
+    <!-- document folded corner -->
     <path
-        android:fillColor="#E53935"
-        android:pathData="M14,2H6C4.9,2 4,2.9 4,4v16c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V8L14,2z"/>
-    <!-- Folded corner -->
+        android:fillColor="#00000000"
+        android:strokeColor="@android:color/black"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M14 3v4a1 1 0 0 0 1 1h4" />
     <path
-        android:fillColor="#EF9A9A"
-        android:pathData="M14,2v6h6"/>
-    <!-- Text lines representing document content -->
+        android:fillColor="#00000000"
+        android:strokeColor="@android:color/black"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M5 12v-7a2 2 0 0 1 2 -2h7l5 5v4" />
+    <!-- P -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M8,16h8v1.2H8zM8,13.2h8v1.2H8zM8,10.4h5v1.2H8z"/>
+        android:fillColor="#00000000"
+        android:strokeColor="@android:color/black"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M5 18h1.5a1.5 1.5 0 0 0 0 -3h-1.5v6" />
+    <!-- D -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="@android:color/black"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M11 15v6h1a2 2 0 0 0 2 -2v-2a2 2 0 0 0 -2 -2h-1" />
+    <!-- F -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="@android:color/black"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M17 18h2" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="@android:color/black"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M20 15h-3v6" />
 </vector>
