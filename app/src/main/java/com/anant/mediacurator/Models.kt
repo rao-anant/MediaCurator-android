@@ -3,7 +3,7 @@ package com.anant.mediacurator
 import java.io.Serializable
 
 enum class MediaType {
-    IMAGE, VIDEO, PDF
+    IMAGE, VIDEO, PDF, AUDIO
 }
 
 enum class SortMode {
@@ -15,10 +15,12 @@ data class MediaStats(
     val visiblePhotos: Int, val hiddenPhotos: Int, val totalPhotos: Int,
     val visibleVideos: Int, val hiddenVideos: Int, val totalVideos: Int,
     val visiblePdfs:   Int, val hiddenPdfs:   Int, val totalPdfs:   Int,
+    val visibleAudios: Int, val hiddenAudios: Int, val totalAudios: Int,
     // Sizes in bytes
     val visiblePhotoBytes: Long, val hiddenPhotoBytes: Long,
     val visibleVideoBytes: Long, val hiddenVideoBytes: Long,
     val visiblePdfBytes:   Long, val hiddenPdfBytes:   Long,
+    val visibleAudioBytes: Long, val hiddenAudioBytes: Long,
     // Integrity
     val integrityOk: Boolean,
     val integrityDetail: String
@@ -59,7 +61,10 @@ sealed class GalleryItem {
         val photoCount: Int = 0,
         val videoCount: Int = 0,
         val pdfCount: Int = 0,
-        override val structuralVersion: Int = 0
+        override val structuralVersion: Int = 0,
+        val previewUris: List<String> = emptyList(),
+        val curatedPct: Int = 0,       // % of months hidden (0 = nothing curated yet)
+        val audioCount: Int = 0
     ) : GalleryItem()
 
     data class Header(
@@ -71,7 +76,8 @@ sealed class GalleryItem {
         val photoCount: Int = 0,
         val videoCount: Int = 0,
         val pdfCount: Int = 0,
-        override val structuralVersion: Int = 0
+        override val structuralVersion: Int = 0,
+        val audioCount: Int = 0
     ) : GalleryItem()
 
     data class Media(
@@ -94,7 +100,8 @@ sealed class GalleryItem {
         val photoCount: Int = 0,
         val videoCount: Int = 0,
         val pdfCount: Int = 0,
-        override val structuralVersion: Int = 0
+        override val structuralVersion: Int = 0,
+        val audioCount: Int = 0
     ) : GalleryItem()
 
     data class Footer(

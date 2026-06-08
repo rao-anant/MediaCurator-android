@@ -44,14 +44,22 @@ class MediaRepository(private val context: Context) {
         // 3. Fetch PDFs (from Files and Downloads)
         fetchPdfs(volume, mediaList)
 
+        // 4. Fetch Audio
+        fetchFromCollection(
+            MediaStore.Audio.Media.getContentUri(volume),
+            MediaType.AUDIO,
+            mediaList
+        )
+
         // Deduplicate based on display name and size to handle files indexed in multiple collections.
         // This is more stable than URI which depends on the collection view (Files vs Images).
         val finalResult = mediaList.distinctBy { "${it.displayName}_${it.size}" }
-        
+
         Log.d("MediaRepository", "Fetched total: ${finalResult.size} items. " +
                 "Images: ${finalResult.count { it.type == MediaType.IMAGE }}, " +
                 "Videos: ${finalResult.count { it.type == MediaType.VIDEO }}, " +
-                "PDFs: ${finalResult.count { it.type == MediaType.PDF }}")
+                "PDFs: ${finalResult.count { it.type == MediaType.PDF }}, " +
+                "Audio: ${finalResult.count { it.type == MediaType.AUDIO }}")
         
         return finalResult
     }

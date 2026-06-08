@@ -78,6 +78,12 @@ class PreferencesManager(context: Context) {
 
     fun isIncludePdf(): Boolean = prefs.getBoolean(KEY_INCLUDE_PDF, true)
 
+    fun saveIncludeAudio(include: Boolean) {
+        prefs.edit().putBoolean(KEY_INCLUDE_AUDIO, include).apply()
+    }
+
+    fun isIncludeAudio(): Boolean = prefs.getBoolean(KEY_INCLUDE_AUDIO, true)
+
     fun monthKey(year: Int, month: Int): String {
         val m = if (month < 10) "0$month" else month.toString()
         return "$year-$m"
@@ -91,6 +97,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_INCLUDE_PHOTO = "include_photo"
         private const val KEY_INCLUDE_VIDEO = "include_video"
         private const val KEY_INCLUDE_PDF = "include_pdf"
+        private const val KEY_INCLUDE_AUDIO = "include_audio"
         private const val KEY_EXPANDED_YEARS     = "expanded_years"
         private const val KEY_EXPANDED_MONTHS    = "expanded_months"
         private const val KEY_EXPANDED_SUBGROUPS = "expanded_subgroups"

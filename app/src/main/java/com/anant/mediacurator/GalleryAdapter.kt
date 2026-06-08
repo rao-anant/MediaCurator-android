@@ -11,9 +11,12 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
+import androidx.core.content.ContextCompat
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.DecodeFormat
 import com.bumptech.glide.load.engine.DiskCacheStrategy
+import com.bumptech.glide.load.resource.bitmap.CenterCrop
+import com.bumptech.glide.load.resource.bitmap.RoundedCorners
 import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.*
 
@@ -40,15 +43,43 @@ class GalleryAdapter(
             else                -> "$b B"
         }
 
-        /** "3 photos · 1 video · 2 PDFs · 1.2 GB" — omits zero-count types */
+        /** "3 photos · 1 video · 2 audios · 2 PDFs · 1.2 GB" — omits zero-count types */
         @JvmStatic
-        fun formatTypeBreakdown(photos: Int, videos: Int, pdfs: Int, bytes: Long): String {
+        fun formatTypeBreakdown(photos: Int, videos: Int, pdfs: Int, bytes: Long, audios: Int = 0): String {
             val parts = mutableListOf<String>()
             if (photos > 0) parts.add("%,d %s".format(photos, if (photos == 1) "photo"  else "photos"))
             if (videos > 0) parts.add("%,d %s".format(videos, if (videos == 1) "video"  else "videos"))
+            if (audios > 0) parts.add("%,d %s".format(audios, if (audios == 1) "audio"  else "audios"))
             if (pdfs   > 0) parts.add("%,d PDF%s".format(pdfs, if (pdfs == 1) "" else "s"))
             if (parts.isEmpty()) parts.add("0 items")
             parts.add(fmtBytes(bytes))
+            return parts.joinToString(" · ")
+        }
+
+        /** "16k", "1.2M", "288" — no unit suffix */
+        fun fmtCountShort(n: Int): String = when {
+            n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0).replace(".0M", "M")
+            n >= 1_000     -> "%.1fk".format(n / 1_000.0).replace(".0k", "k")
+            else           -> "$n"
+        }
+
+        /** "30G", "770K", "1.2G" — SI, no space, no trailing .0 */
+        fun fmtBytesShort(b: Long): String = when {
+            b >= 1_073_741_824L -> "%.1fG".format(b / 1_073_741_824.0).replace(".0G", "G")
+            b >= 1_048_576L     -> "%.1fM".format(b / 1_048_576.0).replace(".0M", "M")
+            b >= 1_024L         -> "%.1fK".format(b / 1_024.0).replace(".0K", "K")
+            else                -> "${b}B"
+        }
+
+        /** "📷 16,234 · 🎬 288 · 🎵 45 · 📄 1,024 · 30G" — compact emoji format for year rows */
+        fun fmtTypeCompact(photos: Int, videos: Int, pdfs: Int, bytes: Long, audios: Int = 0): String {
+            val parts = mutableListOf<String>()
+            if (photos > 0) parts.add("📷 %,d".format(photos))
+            if (videos > 0) parts.add("🎬 %,d".format(videos))
+            if (audios > 0) parts.add("🎵 %,d".format(audios))
+            if (pdfs   > 0) parts.add("📄 %,d".format(pdfs))
+            if (parts.isEmpty()) parts.add("—")
+            parts.add(fmtBytesShort(bytes))
             return parts.joinToString(" · ")
         }
 
@@ -181,14 +212,45 @@ class GalleryAdapter(
     }
 
     inner class YearHeaderViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        private val tvArrow: TextView = itemView.findViewById(R.id.tvExpandArrow)
-        private val tvYear:  TextView = itemView.findViewById(R.id.tvYear)
-        private val tvStats: TextView = itemView.findViewById(R.id.tvYearStats)
+        private val tvArrow:     TextView  = itemView.findViewById(R.id.tvExpandArrow)
+        private val tvYear:      TextView  = itemView.findViewById(R.id.tvYear)
+        private val tvStats:     TextView  = itemView.findViewById(R.id.tvYearStats)
+        private val tvCurated:   TextView  = itemView.findViewById(R.id.tvCuratedPct)
+        private val thumb1:      ImageView = itemView.findViewById(R.id.thumbYear1)
+        private val thumb2:      ImageView = itemView.findViewById(R.id.thumbYear2)
 
         fun bind(header: GalleryItem.YearHeader) {
             tvYear.text  = header.year.toString()
-            tvStats.text = formatTypeBreakdown(header.photoCount, header.videoCount, header.pdfCount, header.totalBytes)
+            tvStats.text = fmtTypeCompact(header.photoCount, header.videoCount, header.pdfCount, header.totalBytes, header.audioCount)
             tvArrow.text = if (header.isExpanded) "▼" else "▶"
+
+            tvCurated.visibility = View.VISIBLE
+            tvCurated.text = "${header.curatedPct}% curated"
+            tvCurated.setTextColor(
+                when {
+                    header.curatedPct == 100 -> ContextCompat.getColor(itemView.context, R.color.check_green)
+                    header.curatedPct == 0   -> ContextCompat.getColor(itemView.context, R.color.on_surface_variant)
+                    else                     -> ContextCompat.getColor(itemView.context, R.color.primary)
+                }
+            )
+
+            val thumbViews = listOf(thumb1, thumb2)
+            val cornerPx = itemView.context.resources.displayMetrics.density.toInt() * 4
+            thumbViews.forEachIndexed { i, iv ->
+                val uri = header.previewUris.getOrNull(i)
+                if (uri != null) {
+                    iv.visibility = View.VISIBLE
+                    Glide.with(itemView.context)
+                        .load(uri)
+                        .override(120)
+                        .transform(CenterCrop(), RoundedCorners(cornerPx))
+                        .into(iv)
+                } else {
+                    iv.visibility = View.GONE
+                    Glide.with(itemView.context).clear(iv)
+                }
+            }
+
             itemView.setOnClickListener { onYearToggle(header.year) }
         }
     }
@@ -201,7 +263,7 @@ class GalleryAdapter(
         fun bind(header: GalleryItem.Header) {
             tvArrow.text = if (header.isExpanded) "▼" else "▶"
             tvLabel.text = header.label
-            tvCount.text = formatTypeBreakdown(header.photoCount, header.videoCount, header.pdfCount, header.totalBytes)
+            tvCount.text = formatTypeBreakdown(header.photoCount, header.videoCount, header.pdfCount, header.totalBytes, header.audioCount)
             itemView.setOnClickListener { onMonthToggle(header.monthKey) }
         }
     }
@@ -214,7 +276,7 @@ class GalleryAdapter(
         fun bind(header: GalleryItem.SubHeader) {
             tvArrow.text = if (header.isExpanded) "▼" else "▶"
             tvLabel.text = header.label
-            tvStats.text = formatTypeBreakdown(header.photoCount, header.videoCount, header.pdfCount, header.totalBytes)
+            tvStats.text = formatTypeBreakdown(header.photoCount, header.videoCount, header.pdfCount, header.totalBytes, header.audioCount)
             itemView.setOnClickListener { onSubGroupToggle(header.subKey) }
         }
     }
@@ -256,7 +318,13 @@ class GalleryAdapter(
             val isFeatured = (media.indexInMonth % 10) == 0
             (imageView as? SquareImageView)?.ratio = if (isFeatured) 1.2f else 1.0f
 
-            if (item.type == MediaType.PDF) {
+            if (item.type == MediaType.AUDIO) {
+                Glide.with(itemView.context).clear(imageView)
+                imageView.setImageResource(R.drawable.ic_audio)
+                imageView.setBackgroundColor(ContextCompat.getColor(itemView.context, R.color.photo_placeholder))
+                imageView.scaleType = ImageView.ScaleType.CENTER_INSIDE
+                typeIcon.visibility = View.GONE
+            } else if (item.type == MediaType.PDF) {
                 Glide.with(itemView.context).clear(imageView)
                 imageView.setImageResource(R.drawable.ic_pdf)
                 imageView.setBackgroundColor(Color.parseColor("#F5F5F5"))
@@ -322,7 +390,7 @@ class GalleryAdapter(
 
             // Size (and duration for videos) shown on every item.
             val sizeStr = fmtBytes(item.size)
-            infoLabel.text = if (item.type == MediaType.VIDEO && item.duration > 0) {
+            infoLabel.text = if ((item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) && item.duration > 0) {
                 "${formatDuration(item.duration)} · $sizeStr"
             } else {
                 sizeStr

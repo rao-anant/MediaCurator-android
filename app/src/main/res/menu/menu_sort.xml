@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <group android:checkableBehavior="single">
+        <item android:id="@+id/sort_newest"        android:title="Newest first" />
+        <item android:id="@+id/sort_oldest"        android:title="Oldest first" />
+        <item android:id="@+id/sort_size_absolute" android:title="Largest first (overall)" />
+        <item android:id="@+id/sort_size_month"    android:title="Largest first (per month)" />
+        <item android:id="@+id/sort_count_month"   android:title="Most items first" />
+    </group>
+</menu>

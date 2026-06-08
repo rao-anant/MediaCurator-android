@@ -119,6 +119,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+        binding.toolbar.setOnClickListener { showSortPopup() }
         // Pad the bottom bar and FAB so they clear the gesture/nav-button bar on Android 15+
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val navBar = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
@@ -174,53 +175,57 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupFilterChips() {
-        binding.chipPhoto.isChecked = viewModel.includePhoto.value ?: true
-        binding.chipVideo.isChecked = viewModel.includeVideo.value ?: true
-        binding.chipPdf.isChecked   = viewModel.includePdf.value  ?: true
-        syncChipIcon(binding.chipPhoto, binding.chipPhoto.isChecked, R.drawable.ic_check)
-        syncChipIcon(binding.chipVideo, binding.chipVideo.isChecked, R.drawable.ic_check)
-        syncChipIcon(binding.chipPdf,   binding.chipPdf.isChecked,   R.drawable.ic_pdf)
+        binding.cardPhoto.tvStatLabel.text = "📷 Photos"
+        binding.cardVideo.tvStatLabel.text = "🎬 Videos"
+        binding.cardAudio.tvStatLabel.text = "🎵 Audio"
+        binding.cardPdf.tvStatLabel.text   = "📄 PDFs"
 
-        binding.chipPhoto.setOnCheckedChangeListener { _, isChecked ->
-            if (!isChecked && !binding.chipVideo.isChecked && !binding.chipPdf.isChecked) {
-                binding.chipPhoto.isChecked = true
-                showToast("At least one filter must be active")
-                return@setOnCheckedChangeListener
-            }
-            syncChipIcon(binding.chipPhoto, isChecked, R.drawable.ic_check)
-            viewModel.setIncludePhoto(isChecked)
+        val photoOn = viewModel.includePhoto.value ?: true
+        val videoOn = viewModel.includeVideo.value ?: true
+        val audioOn = viewModel.includeAudio.value ?: true
+        val pdfOn   = viewModel.includePdf.value   ?: true
+        updateStatCard(binding.cardPhoto, photoOn)
+        updateStatCard(binding.cardVideo, videoOn)
+        updateStatCard(binding.cardAudio, audioOn)
+        updateStatCard(binding.cardPdf,   pdfOn)
+
+        fun activeCount() = listOf(
+            viewModel.includePhoto.value ?: true,
+            viewModel.includeVideo.value ?: true,
+            viewModel.includeAudio.value ?: true,
+            viewModel.includePdf.value   ?: true
+        ).count { it }
+
+        binding.cardPhoto.root.setOnClickListener {
+            val cur = viewModel.includePhoto.value ?: true
+            if (cur && activeCount() <= 1) { showToast("At least one filter must be active"); return@setOnClickListener }
+            val next = !cur; updateStatCard(binding.cardPhoto, next); viewModel.setIncludePhoto(next)
         }
-        binding.chipVideo.setOnCheckedChangeListener { _, isChecked ->
-            if (!isChecked && !binding.chipPhoto.isChecked && !binding.chipPdf.isChecked) {
-                binding.chipVideo.isChecked = true
-                showToast("At least one filter must be active")
-                return@setOnCheckedChangeListener
-            }
-            syncChipIcon(binding.chipVideo, isChecked, R.drawable.ic_check)
-            viewModel.setIncludeVideo(isChecked)
+        binding.cardVideo.root.setOnClickListener {
+            val cur = viewModel.includeVideo.value ?: true
+            if (cur && activeCount() <= 1) { showToast("At least one filter must be active"); return@setOnClickListener }
+            val next = !cur; updateStatCard(binding.cardVideo, next); viewModel.setIncludeVideo(next)
         }
-        binding.chipPdf.setOnCheckedChangeListener { _, isChecked ->
-            if (!isChecked && !binding.chipPhoto.isChecked && !binding.chipVideo.isChecked) {
-                binding.chipPdf.isChecked = true
-                showToast("At least one filter must be active")
-                return@setOnCheckedChangeListener
-            }
-            syncChipIcon(binding.chipPdf, isChecked, R.drawable.ic_pdf)
-            viewModel.setIncludePdf(isChecked)
+        binding.cardAudio.root.setOnClickListener {
+            val cur = viewModel.includeAudio.value ?: true
+            if (cur && activeCount() <= 1) { showToast("At least one filter must be active"); return@setOnClickListener }
+            val next = !cur; updateStatCard(binding.cardAudio, next); viewModel.setIncludeAudio(next)
+        }
+        binding.cardPdf.root.setOnClickListener {
+            val cur = viewModel.includePdf.value ?: true
+            if (cur && activeCount() <= 1) { showToast("At least one filter must be active"); return@setOnClickListener }
+            val next = !cur; updateStatCard(binding.cardPdf, next); viewModel.setIncludePdf(next)
         }
     }
 
-    private fun syncChipIcon(chip: com.google.android.material.chip.Chip, isChecked: Boolean, checkedRes: Int) {
+    private fun updateStatCard(card: com.anant.mediacurator.databinding.ItemStatChipBinding, isEnabled: Boolean) {
         val greenColor = ContextCompat.getColor(this, R.color.check_green)
-        val errorColor = MaterialColors.getColor(chip, com.google.android.material.R.attr.colorError)
-        if (isChecked) {
-            chip.chipIcon = AppCompatResources.getDrawable(this, checkedRes)
-            chip.chipIconTint = ColorStateList.valueOf(greenColor)
-        } else {
-            chip.chipIcon = AppCompatResources.getDrawable(this, R.drawable.ic_close)
-            chip.chipIconTint = ColorStateList.valueOf(errorColor)
-        }
-        chip.isChipIconVisible = true
+        val errorColor = MaterialColors.getColor(card.root, com.google.android.material.R.attr.colorError)
+        val color = if (isEnabled) greenColor else errorColor
+        (card.root as com.google.android.material.card.MaterialCardView).strokeColor = color
+        val iconRes = if (isEnabled) R.drawable.ic_check else R.drawable.ic_close
+        card.ivStatState.setImageResource(iconRes)
+        card.ivStatState.setColorFilter(color, android.graphics.PorterDuff.Mode.SRC_IN)
     }
 
     override fun onResume() {
@@ -323,7 +328,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupRestoreSpinners() {
         binding.autoCompleteYear.setOnItemClickListener { parent, _, position, _ ->
-            // Item is "2023 (450)" — extract just the year
             val selectedItem = parent.getItemAtPosition(position) as String
             val year = selectedItem.substringBefore(" ").trim()
             updateMonthsDropdown(year)
@@ -332,8 +336,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.autoCompleteMonth.setOnItemClickListener { parent, _, position, _ ->
-            // Item is "Jan (45 / 2.3MB)" — extract the 3-char abbreviation, then match
-            // against the full month label (e.g. "Jan" matches "January 2024").
             val abbr = (parent.getItemAtPosition(position) as String).substringBefore(" (")
             val yearStr = binding.autoCompleteYear.text.toString().substringBefore(" ").trim()
             val year = yearStr.toIntOrNull() ?: return@setOnItemClickListener
@@ -427,11 +429,11 @@ class MainActivity : AppCompatActivity() {
         viewModel.sortMode.observe(this) { mode ->
             invalidateOptionsMenu()
             supportActionBar?.subtitle = when (mode) {
-                SortMode.DATE_NEWEST       -> "Newest first"
-                SortMode.DATE_OLDEST       -> "Oldest first"
-                SortMode.SIZE_ABSOLUTE     -> "Largest first (overall)"
-                SortMode.SIZE_WITHIN_MONTH -> "Largest first (per month)"
-                SortMode.COUNT_PER_MONTH   -> "Most items first"
+                SortMode.DATE_NEWEST       -> "Newest first ▾"
+                SortMode.DATE_OLDEST       -> "Oldest first ▾"
+                SortMode.SIZE_ABSOLUTE     -> "Largest first (overall) ▾"
+                SortMode.SIZE_WITHIN_MONTH -> "Largest first (per month) ▾"
+                SortMode.COUNT_PER_MONTH   -> "Most items first ▾"
             }
             // Unhide panel is a tree-view operation — hide it in flat mode
             updateRestoreLayoutVisibility()
@@ -506,11 +508,14 @@ class MainActivity : AppCompatActivity() {
             if (stats == null) return@observe
             val totalPhotoBytes = stats.visiblePhotoBytes + stats.hiddenPhotoBytes
             val totalVideoBytes = stats.visibleVideoBytes + stats.hiddenVideoBytes
+            val totalAudioBytes = stats.visibleAudioBytes + stats.hiddenAudioBytes
             val totalPdfBytes   = stats.visiblePdfBytes   + stats.hiddenPdfBytes
-            binding.chipPhoto.text = chipText("📷", stats.totalPhotos, stats.hiddenPhotos, totalPhotoBytes)
-            binding.chipVideo.text = chipText("🎬", stats.totalVideos, stats.hiddenVideos, totalVideoBytes)
-            binding.chipPdf.text   = chipText("", stats.totalPdfs,  stats.hiddenPdfs,  totalPdfBytes)
-            binding.chipPdf.isVisible = stats.totalPdfs > 0
+            binding.cardPhoto.tvStatCounts.text = statsText(stats.totalPhotos, stats.hiddenPhotos, totalPhotoBytes)
+            binding.cardVideo.tvStatCounts.text = statsText(stats.totalVideos, stats.hiddenVideos, totalVideoBytes)
+            binding.cardAudio.tvStatCounts.text = statsText(stats.totalAudios, stats.hiddenAudios, totalAudioBytes)
+            binding.cardPdf.tvStatCounts.text   = statsText(stats.totalPdfs,   stats.hiddenPdfs,  totalPdfBytes)
+            binding.cardAudio.root.isVisible = stats.totalAudios > 0
+            binding.cardPdf.root.isVisible   = stats.totalPdfs   > 0
         }
 
         viewModel.autoRestorePrompt.observe(this) { months ->
@@ -555,22 +560,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
         val inSelection = adapter.selectionMode
-        menu.findItem(R.id.action_sort)?.isVisible = !inSelection
-        // With checkableBehavior="single", only set the target item to true —
-        // the group automatically unchecks all siblings. Setting others to false
-        // explicitly triggers unexpected exclusive-group side-effects.
-        val mode = viewModel.sortMode.value ?: SortMode.DATE_OLDEST
-        val sortSub = menu.findItem(R.id.action_sort)?.subMenu
-        if (sortSub != null) {
-            val targetId = when (mode) {
-                SortMode.DATE_NEWEST       -> R.id.sort_newest
-                SortMode.DATE_OLDEST       -> R.id.sort_oldest
-                SortMode.SIZE_ABSOLUTE     -> R.id.sort_size_absolute
-                SortMode.SIZE_WITHIN_MONTH -> R.id.sort_size_month
-                SortMode.COUNT_PER_MONTH   -> R.id.sort_count_month
-            }
-            sortSub.findItem(targetId)?.isChecked = true
-        }
         menu.findItem(R.id.action_refresh)?.isVisible = !inSelection
         
         val oneClickItem = menu.findItem(R.id.action_one_click_delete)
@@ -605,6 +594,30 @@ class MainActivity : AppCompatActivity() {
         R.id.action_help -> { showHelpDialog(); true }
         R.id.action_stats_info -> { showStatsDialog(); true }
         else -> super.onOptionsItemSelected(item)
+    }
+
+    private fun showSortPopup() {
+        val popup = androidx.appcompat.widget.PopupMenu(this, binding.toolbar)
+        popup.menuInflater.inflate(R.menu.menu_sort, popup.menu)
+        val checkedId = when (viewModel.sortMode.value ?: SortMode.DATE_OLDEST) {
+            SortMode.DATE_NEWEST       -> R.id.sort_newest
+            SortMode.DATE_OLDEST       -> R.id.sort_oldest
+            SortMode.SIZE_ABSOLUTE     -> R.id.sort_size_absolute
+            SortMode.SIZE_WITHIN_MONTH -> R.id.sort_size_month
+            SortMode.COUNT_PER_MONTH   -> R.id.sort_count_month
+        }
+        popup.menu.findItem(checkedId)?.isChecked = true
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.sort_newest        -> viewModel.setSortMode(SortMode.DATE_NEWEST)
+                R.id.sort_oldest        -> viewModel.setSortMode(SortMode.DATE_OLDEST)
+                R.id.sort_size_absolute -> viewModel.setSortMode(SortMode.SIZE_ABSOLUTE)
+                R.id.sort_size_month    -> viewModel.setSortMode(SortMode.SIZE_WITHIN_MONTH)
+                R.id.sort_count_month   -> viewModel.setSortMode(SortMode.COUNT_PER_MONTH)
+            }
+            true
+        }
+        popup.show()
     }
 
     private fun hasManageMediaPermission(): Boolean {
@@ -714,9 +727,11 @@ class MainActivity : AppCompatActivity() {
         val stats        = viewModel.mediaStats.value
         val allChipsOn   = (viewModel.includePhoto.value ?: true) &&
                            (viewModel.includeVideo.value ?: true) &&
+                           (viewModel.includeAudio.value ?: true) &&
                            (viewModel.includePdf.value   ?: true)
         val totalVisible = (stats?.visiblePhotos ?: 0) +
                            (stats?.visibleVideos ?: 0) +
+                           (stats?.visibleAudios ?: 0) +
                            (stats?.visiblePdfs   ?: 0)
 
         if (!allChipsOn && totalVisible > 0) {
@@ -740,23 +755,29 @@ class MainActivity : AppCompatActivity() {
         fun rowB(label: String, vb: Long, hb: Long) =
             "%-8s %s + %s = %s".format(label, fmtBytes(vb), fmtBytes(hb), fmtBytes(vb + hb))
 
-        val vAll = s.visiblePhotos + s.visibleVideos + s.visiblePdfs
-        val hAll = s.hiddenPhotos  + s.hiddenVideos  + s.hiddenPdfs
-        val tAll = s.totalPhotos   + s.totalVideos   + s.totalPdfs
-        val vbAll = s.visiblePhotoBytes + s.visibleVideoBytes + s.visiblePdfBytes
-        val hbAll = s.hiddenPhotoBytes  + s.hiddenVideoBytes  + s.hiddenPdfBytes
+        val vAll = s.visiblePhotos + s.visibleVideos + s.visibleAudios + s.visiblePdfs
+        val hAll = s.hiddenPhotos  + s.hiddenVideos  + s.hiddenAudios  + s.hiddenPdfs
+        val tAll = s.totalPhotos   + s.totalVideos   + s.totalAudios   + s.totalPdfs
+        val vbAll = s.visiblePhotoBytes + s.visibleVideoBytes + s.visibleAudioBytes + s.visiblePdfBytes
+        val hbAll = s.hiddenPhotoBytes  + s.hiddenVideoBytes  + s.hiddenAudioBytes  + s.hiddenPdfBytes
 
         val msg = buildString {
             appendLine("COUNTS  (visible + hidden = total)")
             appendLine(row("Photos",  s.visiblePhotos, s.hiddenPhotos, s.totalPhotos))
             appendLine(row("Videos",  s.visibleVideos, s.hiddenVideos, s.totalVideos))
-            appendLine(row("PDFs",    s.visiblePdfs,   s.hiddenPdfs,   s.totalPdfs))
+            if (s.totalAudios > 0)
+                appendLine(row("Audio",   s.visibleAudios, s.hiddenAudios, s.totalAudios))
+            if (s.totalPdfs > 0)
+                appendLine(row("PDFs",    s.visiblePdfs,   s.hiddenPdfs,   s.totalPdfs))
             appendLine(row("All",     vAll, hAll, tAll))
             appendLine()
             appendLine("SIZES   (visible + hidden = total)")
             appendLine(rowB("Photos",  s.visiblePhotoBytes, s.hiddenPhotoBytes))
             appendLine(rowB("Videos",  s.visibleVideoBytes, s.hiddenVideoBytes))
-            appendLine(rowB("PDFs",    s.visiblePdfBytes,   s.hiddenPdfBytes))
+            if (s.totalAudios > 0)
+                appendLine(rowB("Audio",   s.visibleAudioBytes, s.hiddenAudioBytes))
+            if (s.totalPdfs > 0)
+                appendLine(rowB("PDFs",    s.visiblePdfBytes,   s.hiddenPdfBytes))
             appendLine(rowB("All",     vbAll, hbAll))
             appendLine()
             append(s.integrityDetail)
@@ -1063,10 +1084,9 @@ class MainActivity : AppCompatActivity() {
         else                -> "${b}B"
     }
 
-    private fun chipText(icon: String, total: Int, hidden: Int, bytes: Long): String {
+    private fun statsText(total: Int, hidden: Int, bytes: Long): String {
         val counts = if (hidden > 0) "${fmtCountShort(total)}/${fmtCountShort(hidden)}" else fmtCountShort(total)
-        val stats = "$counts · ${fmtSizeShort(bytes)}"
-        return if (icon.isEmpty()) stats else "$icon $stats"
+        return "$counts · ${fmtSizeShort(bytes)}"
     }
 
     // ── Help ──────────────────────────────────────────────────────────────────

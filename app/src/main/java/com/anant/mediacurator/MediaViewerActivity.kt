@@ -126,6 +126,7 @@ class MediaViewerActivity : AppCompatActivity() {
                 val mime = when (item.type) {
                     MediaType.IMAGE -> "image/*"
                     MediaType.VIDEO -> "video/*"
+                    MediaType.AUDIO -> "audio/*"
                     MediaType.PDF   -> return@setOnClickListener
                 }
                 try {
@@ -212,7 +213,8 @@ class MediaViewerActivity : AppCompatActivity() {
             type = when (item.type) {
                 MediaType.IMAGE -> "image/*"
                 MediaType.VIDEO -> "video/*"
-                MediaType.PDF -> "application/pdf"
+                MediaType.AUDIO -> "audio/*"
+                MediaType.PDF   -> "application/pdf"
             }
             putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -283,6 +285,28 @@ class MediaViewerActivity : AppCompatActivity() {
                             } else {
                                 binding.videoView.start()
                                 binding.btnPlayPause.isVisible = false
+                            }
+                        }
+                    }
+                    MediaType.AUDIO -> {
+                        binding.photoView.isVisible = false
+                        binding.videoContainer.isVisible = true
+                        binding.btnPlayPause.isVisible = false
+                        binding.tvError.isVisible = true
+                        binding.tvError.text = "Tap to play audio"
+                        binding.videoContainer.setOnClickListener {
+                            val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(Uri.parse(item.uri), "audio/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            try {
+                                binding.root.context.startActivity(openIntent)
+                            } catch (e: Exception) {
+                                try {
+                                    binding.root.context.startActivity(
+                                        Intent.createChooser(openIntent, "Play audio with")
+                                    )
+                                } catch (e2: Exception) { /* no audio player installed */ }
                             }
                         }
                     }

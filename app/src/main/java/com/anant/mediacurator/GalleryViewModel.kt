@@ -59,6 +59,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private val _includePdf = MutableLiveData<Boolean>()
     val includePdf: LiveData<Boolean> = _includePdf
 
+    private val _includeAudio = MutableLiveData<Boolean>()
+    val includeAudio: LiveData<Boolean> = _includeAudio
+
     private val _mediaStats = MutableLiveData<MediaStats?>()
     val mediaStats: LiveData<MediaStats?> = _mediaStats
 
@@ -85,6 +88,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _totalPdfs = MutableLiveData<Int>(0)
     val totalPdfs: LiveData<Int> = _totalPdfs
+
+    private val _totalAudios = MutableLiveData<Int>(0)
+    val totalAudios: LiveData<Int> = _totalAudios
 
     // Non-null while a "backup found — import?" prompt is waiting for user response.
     // Set to null after the user confirms or skips to prevent re-showing on rotation.
@@ -133,6 +139,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         _includePhoto.value = prefs.isIncludePhoto()
         _includeVideo.value = prefs.isIncludeVideo()
         _includePdf.value = prefs.isIncludePdf()
+        _includeAudio.value = prefs.isIncludeAudio()
         expandedYears.addAll(prefs.getExpandedYears())
         expandedMonths.addAll(prefs.getExpandedMonths())
         expandedSubGroups.addAll(prefs.getExpandedSubGroups())
@@ -164,6 +171,15 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         if (_includePdf.value != include) {
             _includePdf.value = include
             prefs.saveIncludePdf(include)
+            pendingScrollToTop = true
+            loadMedia(forceRefresh = false)
+        }
+    }
+
+    fun setIncludeAudio(include: Boolean) {
+        if (_includeAudio.value != include) {
+            _includeAudio.value = include
+            prefs.saveIncludeAudio(include)
             pendingScrollToTop = true
             loadMedia(forceRefresh = false)
         }
@@ -207,7 +223,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         val sortMode = _sortMode.value ?: SortMode.DATE_OLDEST
         val photoOn = _includePhoto.value ?: true
         val videoOn = _includeVideo.value ?: true
-        val pdfOn = _includePdf.value ?: true
+        val pdfOn   = _includePdf.value   ?: true
+        val audioOn = _includeAudio.value ?: true
         val doneMonthKeys = prefs.getDoneMonths()
         val currentVersion = structuralVersion
 
@@ -250,13 +267,15 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             _totalPhotos.postValue(filteredMedia.count { it.type == MediaType.IMAGE })
             _totalVideos.postValue(filteredMedia.count { it.type == MediaType.VIDEO })
             _totalPdfs.postValue(filteredMedia.count { it.type == MediaType.PDF })
+            _totalAudios.postValue(filteredMedia.count { it.type == MediaType.AUDIO })
 
             // 4. Apply type filters
             val displayMedia = filteredMedia.filter { item ->
                 when (item.type) {
                     MediaType.IMAGE -> photoOn
                     MediaType.VIDEO -> videoOn
-                    MediaType.PDF -> pdfOn
+                    MediaType.PDF   -> pdfOn
+                    MediaType.AUDIO -> audioOn
                 }
             }
 
@@ -271,6 +290,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             val vPhotos = countOf(allVisibleFull, MediaType.IMAGE); val hPhotos = countOf(doneGroups, MediaType.IMAGE)
             val vVideos = countOf(allVisibleFull, MediaType.VIDEO); val hVideos = countOf(doneGroups, MediaType.VIDEO)
             val vPdfs   = countOf(allVisibleFull, MediaType.PDF);   val hPdfs   = countOf(doneGroups, MediaType.PDF)
+            val vAudios = countOf(allVisibleFull, MediaType.AUDIO); val hAudios = countOf(doneGroups, MediaType.AUDIO)
 
             val checkVisible = allVisibleFull.sumOf { it.items.size }
             val checkHidden  = doneGroups.sumOf { it.items.size }
@@ -283,9 +303,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 vPhotos, hPhotos, filteredMedia.count { it.type == MediaType.IMAGE },
                 vVideos, hVideos, filteredMedia.count { it.type == MediaType.VIDEO },
                 vPdfs,   hPdfs,   filteredMedia.count { it.type == MediaType.PDF   },
+                vAudios, hAudios, filteredMedia.count { it.type == MediaType.AUDIO },
                 bytesOf(allVisibleFull, MediaType.IMAGE), bytesOf(doneGroups, MediaType.IMAGE),
                 bytesOf(allVisibleFull, MediaType.VIDEO), bytesOf(doneGroups, MediaType.VIDEO),
                 bytesOf(allVisibleFull, MediaType.PDF),   bytesOf(doneGroups, MediaType.PDF),
+                bytesOf(allVisibleFull, MediaType.AUDIO), bytesOf(doneGroups, MediaType.AUDIO),
                 integrityOk, integrityDetail
             ))
 
@@ -329,8 +351,20 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                     val yearPhotos    = months.sumOf { g -> g.items.count { it.type == MediaType.IMAGE } }
                     val yearVideos    = months.sumOf { g -> g.items.count { it.type == MediaType.VIDEO } }
                     val yearPdfs      = months.sumOf { g -> g.items.count { it.type == MediaType.PDF   } }
+                    val yearAudios    = months.sumOf { g -> g.items.count { it.type == MediaType.AUDIO } }
                     val isYearExpanded = expandedYearsSnapshot.contains(year)
-                    treeItems.add(GalleryItem.YearHeader(year, yearItemCount, yearBytes, isYearExpanded, yearPhotos, yearVideos, yearPdfs, currentVersion))
+                    val visualMonths = months.filter { g -> g.items.any { it.type == MediaType.IMAGE || it.type == MediaType.VIDEO } }
+                    val pickIndices = when (visualMonths.size) {
+                        0    -> emptyList()
+                        1    -> listOf(0)
+                        else -> listOf(0, visualMonths.lastIndex)
+                    }
+                    val previewUris = pickIndices
+                        .mapNotNull { i -> visualMonths[i].items.firstOrNull { it.type == MediaType.IMAGE || it.type == MediaType.VIDEO }?.uri }
+                    val doneInYear  = doneMonthKeys.count { it.startsWith("$year-") }
+                    val totalMonths = months.size + doneInYear   // visible + hidden months
+                    val curatedPct  = if (totalMonths > 0) (doneInYear * 100) / totalMonths else 0
+                    treeItems.add(GalleryItem.YearHeader(year, yearItemCount, yearBytes, isYearExpanded, yearPhotos, yearVideos, yearPdfs, currentVersion, previewUris, curatedPct, yearAudios))
                     if (isYearExpanded) {
                         for (group in months) {
                             val monthItemCount  = group.items.size
@@ -338,8 +372,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                             val monthPhotos     = group.items.count { it.type == MediaType.IMAGE }
                             val monthVideos     = group.items.count { it.type == MediaType.VIDEO }
                             val monthPdfs       = group.items.count { it.type == MediaType.PDF   }
+                            val monthAudios     = group.items.count { it.type == MediaType.AUDIO }
                             val isMonthExpanded = expandedMonthsSnapshot.contains(group.key)
-                            treeItems.add(GalleryItem.Header(group.key, group.label, monthItemCount, monthBytes, isMonthExpanded, monthPhotos, monthVideos, monthPdfs, currentVersion))
+                            treeItems.add(GalleryItem.Header(group.key, group.label, monthItemCount, monthBytes, isMonthExpanded, monthPhotos, monthVideos, monthPdfs, currentVersion, monthAudios))
                             if (isMonthExpanded) {
                                 val waItems  = group.items.filter { it.isWhatsApp }
                                 val camItems = group.items.filter { !it.isWhatsApp }
@@ -365,7 +400,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                                             photoCount = camItems.count { it.type == MediaType.IMAGE },
                                             videoCount = camItems.count { it.type == MediaType.VIDEO },
                                             pdfCount   = camItems.count { it.type == MediaType.PDF },
-                                            structuralVersion = currentVersion
+                                            structuralVersion = currentVersion,
+                                            audioCount = camItems.count { it.type == MediaType.AUDIO }
                                         ))
                                         if (isCamExpanded) {
                                             camItems.forEachIndexed { index, mediaItem ->
@@ -383,7 +419,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                                         photoCount = waItems.count { it.type == MediaType.IMAGE },
                                         videoCount = waItems.count { it.type == MediaType.VIDEO },
                                         pdfCount   = waItems.count { it.type == MediaType.PDF },
-                                        structuralVersion = currentVersion
+                                        structuralVersion = currentVersion,
+                                        audioCount = waItems.count { it.type == MediaType.AUDIO }
                                     ))
                                     if (isWaExpanded) {
                                         waItems.forEachIndexed { index, mediaItem ->
@@ -447,6 +484,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             _totalPhotos.postValue(media.count { it.type == MediaType.IMAGE })
             _totalVideos.postValue(media.count { it.type == MediaType.VIDEO })
             _totalPdfs.postValue(media.count { it.type == MediaType.PDF })
+            _totalAudios.postValue(media.count { it.type == MediaType.AUDIO })
         }
 
         viewModelScope.launch(Dispatchers.IO) {
@@ -570,6 +608,21 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         expandedYears.add(year)   // ensure year is open so we can scroll to the month
         expandedMonths.add(key)   // ensure month is open so items are visible
         pendingScrollToMonthKey = key
+        structuralVersion++
+        loadMedia(forceRefresh = false)
+    }
+
+    /** Unhide all months belonging to [year] in a single batch load. */
+    fun restoreYear(year: Int) {
+        val monthsInYear = _doneMonthsAvailable.value?.filter { it.year == year } ?: return
+        if (monthsInYear.isEmpty()) return
+        monthsInYear.forEach { group ->
+            prefs.unmarkMonthDone(group.year, group.month)
+            expandedYears.add(group.year)
+            expandedMonths.add(prefs.monthKey(group.year, group.month))
+        }
+        autoSaveBackup()
+        pendingScrollToMonthKey = prefs.monthKey(year, monthsInYear.first().month)
         structuralVersion++
         loadMedia(forceRefresh = false)
     }

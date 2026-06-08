@@ -25,71 +25,50 @@
             app:title="@string/app_name"
             app:layout_scrollFlags="scroll|enterAlways" />
 
-        <!-- Single row: filter chips (with counts) + hidden total + ⓘ -->
+        <!-- Stat cards row: Photos / Videos / PDFs -->
         <LinearLayout
             android:id="@+id/settingsBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:paddingStart="6dp"
-            android:paddingEnd="4dp"
-            android:paddingTop="4dp"
-            android:paddingBottom="4dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
             android:background="@color/surface"
             app:layout_scrollFlags="scroll|enterAlways">
 
-            <com.google.android.material.chip.Chip
-                android:id="@+id/chipPhoto"
-                style="@style/Widget.Material3.Chip.Filter"
-                android:layout_width="wrap_content"
+            <include
+                android:id="@+id/cardPhoto"
+                layout="@layout/item_stat_chip"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="📷"
-                android:textSize="13sp"
-                android:checked="true"
-                app:chipMinHeight="32dp"
-                app:chipIconSize="16dp"
-                app:chipStartPadding="4dp"
-                app:chipEndPadding="6dp"
-                app:checkedIconVisible="false" />
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp" />
 
-            <View
-                android:layout_width="8dp"
-                android:layout_height="1dp"
+            <include
+                android:id="@+id/cardVideo"
+                layout="@layout/item_stat_chip"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp" />
+
+            <include
+                android:id="@+id/cardAudio"
+                layout="@layout/item_stat_chip"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp" />
+
+            <include
+                android:id="@+id/cardPdf"
+                layout="@layout/item_stat_chip"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1" />
-
-            <com.google.android.material.chip.Chip
-                android:id="@+id/chipVideo"
-                style="@style/Widget.Material3.Chip.Filter"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="🎬"
-                android:textSize="13sp"
-                android:checked="true"
-                app:chipMinHeight="32dp"
-                app:chipIconSize="16dp"
-                app:chipStartPadding="4dp"
-                app:chipEndPadding="6dp"
-                app:checkedIconVisible="false" />
-
-            <View
-                android:layout_width="8dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
-
-            <com.google.android.material.chip.Chip
-                android:id="@+id/chipPdf"
-                style="@style/Widget.Material3.Chip.Filter"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text=""
-                android:textSize="13sp"
-                android:checked="true"
-                app:chipMinHeight="32dp"
-                app:chipIconSize="16dp"
-                app:chipStartPadding="4dp"
-                app:chipEndPadding="6dp"
-                app:checkedIconVisible="false" />
 
         </LinearLayout>
 
@@ -166,6 +145,7 @@
                         android:paddingTop="8dp"
                         android:paddingBottom="8dp" />
                 </com.google.android.material.textfield.TextInputLayout>
+
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.appbar.AppBarLayout>

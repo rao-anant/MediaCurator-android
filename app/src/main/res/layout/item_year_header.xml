@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="60dp"
+    android:layout_height="64dp"
     android:orientation="horizontal"
     android:gravity="center_vertical"
     android:background="@color/surface_variant"
     android:paddingStart="14dp"
-    android:paddingEnd="16dp">
+    android:paddingEnd="10dp">
 
     <!-- Expand / collapse chevron -->
     <TextView
@@ -18,24 +18,65 @@
         android:textColor="@color/primary"
         android:layout_marginEnd="12dp" />
 
-    <!-- Year -->
-    <TextView
-        android:id="@+id/tvYear"
+    <!-- Year + stats stacked vertically -->
+    <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:text="2023"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:textColor="@color/on_surface" />
+        android:orientation="vertical">
 
-    <!-- Item count + size -->
-    <TextView
-        android:id="@+id/tvYearStats"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="1,234 · 4.2 GB"
-        android:textSize="12sp"
-        android:textColor="@color/on_surface_variant" />
+        <!-- Row 1: year + curated % inline -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tvYear"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="2023"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="@color/on_surface" />
+
+            <TextView
+                android:id="@+id/tvCuratedPct"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:layout_marginStart="10dp"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+        <!-- Row 2: compact type breakdown -->
+        <TextView
+            android:id="@+id/tvYearStats"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="13sp"
+            android:textColor="@color/on_surface_variant"
+            android:layout_marginTop="1dp" />
+
+    </LinearLayout>
+
+    <!-- Thumbnail strip: up to 3 preview images -->
+    <ImageView
+        android:id="@+id/thumbYear1"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:scaleType="centerCrop"
+        android:visibility="gone" />
+
+    <ImageView
+        android:id="@+id/thumbYear2"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:scaleType="centerCrop"
+        android:layout_marginStart="3dp"
+        android:visibility="gone" />
+
 
 </LinearLayout>
