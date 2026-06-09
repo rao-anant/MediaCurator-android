@@ -4,10 +4,13 @@ import android.content.ContentUris
 import android.content.Context
 import android.content.IntentSender
 import android.database.Cursor
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -105,7 +108,13 @@ class MediaRepository(private val context: Context) {
                     val dur     = if (durCol     != -1) cursor.getLong(durCol)    else 0L
                     val relPath = if (relPathCol != -1) cursor.getString(relPathCol) ?: "" else ""
 
-                    val bestDate = resolveBestDate(name, dt, dm, da)
+                    // Audio uses a dedicated resolver that prefers DATE_MODIFIED (filesystem
+                    // mtime, preserved during rename) over DATE_ADDED (MediaStore index time,
+                    // which resets to "now" every time the file is re-scanned).
+                    val bestDate = if (type == MediaType.AUDIO)
+                        resolveAudioDate(name, dt, dm, da)
+                    else
+                        resolveBestDate(name, dt, dm, da)
                     val uri = ContentUris.withAppendedId(collectionUri, id).toString()
 
                     mediaList.add(MediaItem(id, uri, "external", bestDate, name, size, type, dur, relPath))
@@ -240,6 +249,53 @@ class MediaRepository(private val context: Context) {
         return Pair(visibleGroups, doneGroups)
     }
 
+    /**
+     * Date resolver for audio files.
+     *
+     * Audio files are different from images/PDFs in one key way: every time MediaStore
+     * re-scans an audio file (e.g. after a rename), it resets DATE_ADDED to the current
+     * time.  DATE_MODIFIED (filesystem mtime) is more stable — and when we rename via
+     * File.renameTo() we explicitly call setLastModified() to preserve the original mtime.
+     *
+     * Priority:
+     *   1. Exact date in filename (e.g. AUD-2025-03-15)
+     *   2. Year hint in filename
+     *   3. DATE_TAKEN (actual recording time, if set — most accurate)
+     *   4. DATE_MODIFIED (filesystem mtime — preserved during rename, stable across rescans)
+     *   5. DATE_ADDED (last resort — unreliable after re-index)
+     */
+    private fun resolveAudioDate(name: String, dt: Long, dm: Long, da: Long): Long {
+        val now = System.currentTimeMillis()
+        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+
+        fun isReasonable(ts: Long): Boolean {
+            if (ts <= 1_000_000L || ts > now) return false
+            val year = Calendar.getInstance().also { it.timeInMillis = ts }.get(Calendar.YEAR)
+            return year in 1980..currentYear
+        }
+
+        val filenameDate = extractDateFromFilename(name)
+        if (filenameDate > 1_000_000L) return filenameDate
+
+        val yearMatch = yearOnlyRegex.find(name)
+        if (yearMatch != null && dt <= 0) {
+            try {
+                val year = yearMatch.value.toInt()
+                if (year in 1980..currentYear) {
+                    val cal = Calendar.getInstance()
+                    cal.set(year, 0, 1, 12, 0, 0); cal.set(Calendar.MILLISECOND, 0)
+                    return cal.timeInMillis
+                }
+            } catch (_: Exception) {}
+        }
+
+        if (isReasonable(dt)) return dt   // DATE_TAKEN — recording date
+        if (isReasonable(dm)) return dm   // DATE_MODIFIED — filesystem mtime (preserved on rename)
+        if (isReasonable(da)) return da   // DATE_ADDED — last resort
+
+        return now
+    }
+
     private fun resolveBestDate(name: String, dt: Long, dm: Long, da: Long): Long {
         val now = System.currentTimeMillis()
         val currentYear = Calendar.getInstance().get(Calendar.YEAR)
@@ -361,6 +417,137 @@ class MediaRepository(private val context: Context) {
             } catch (e: Exception) {}
         }
         return 0L
+    }
+
+    /**
+     * Attempt to rename [item] to [newDisplayName] via ContentResolver.
+     * Returns true if the MediaStore row was updated, false on any failure.
+     * On Android 11+ without MANAGE_EXTERNAL_STORAGE this will throw a SecurityException
+     * for files not owned by this app — the caller should catch that case and use
+     * [createRenameWriteRequest] to obtain user permission first.
+     */
+    fun renameMedia(item: MediaItem, newDisplayName: String): Boolean {
+        val uri = android.net.Uri.parse(item.uri)
+
+        // ── Step 1: read the physical path BEFORE touching MediaStore ────────────
+        // On many Samsung / Android devices, contentResolver.update(DISPLAY_NAME)
+        // deletes the old MediaStore row entirely.  If we query DATA afterwards we
+        // get an empty cursor, so we read it now while the row still exists.
+        @Suppress("DEPRECATION")
+        val oldPath: String? = context.contentResolver.query(
+            uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null
+        )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+
+        Log.d("MediaRepository", "renameMedia: oldPath=$oldPath newName=$newDisplayName")
+
+        // ── Step 2: attempt filesystem rename first ───────────────────────────────
+        // With MANAGE_EXTERNAL_STORAGE we can rename directly on the filesystem,
+        // which is more reliable than relying on MediaStore to handle it atomically.
+        if (!oldPath.isNullOrEmpty()) {
+            val oldFile = File(oldPath)
+            val parent  = oldFile.parentFile
+            if (parent != null && oldFile.exists()) {
+                val originalMtime = oldFile.lastModified()   // snapshot before rename
+                val newFile = File(parent, newDisplayName)
+                if (oldFile.renameTo(newFile)) {
+                    // Restore the original modification time so MediaStore's DATE_MODIFIED
+                    // reflects the file's real age rather than the rename timestamp.
+                    // resolveAudioDate() prefers DATE_MODIFIED over DATE_ADDED, so this
+                    // keeps the file in its original year/month after re-indexing.
+                    newFile.setLastModified(originalMtime)
+                    Log.d("MediaRepository", "Filesystem rename OK → ${newFile.absolutePath}")
+                    // Sync the display name in MediaStore (best-effort — the row may have
+                    // already been deleted, or this may fail for permission reasons)
+                    try {
+                        context.contentResolver.update(uri, android.content.ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, newDisplayName)
+                        }, null, null)
+                    } catch (_: Exception) { /* ignore — physical file is already renamed */ }
+                    // Re-index: scanning the old path removes the stale entry; the new path
+                    // creates a fresh entry so the file reappears in MediaStore queries.
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(oldFile.absolutePath, newFile.absolutePath),
+                        null
+                    ) { path, scannedUri ->
+                        Log.d("MediaRepository", "Scan done: $path → $scannedUri")
+                    }
+                    return true
+                }
+            }
+        }
+
+        // ── Step 3: fallback — ContentResolver-only rename ────────────────────────
+        // Used when we don't have a physical path (e.g. virtual/cloud entries) or
+        // File.renameTo() failed.
+        return try {
+            val rows = context.contentResolver.update(uri, android.content.ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, newDisplayName)
+            }, null, null)
+            if (rows > 0) {
+                // Scan the directory from what we know: old file path (if any) and the
+                // computed new path from RELATIVE_PATH.
+                triggerFallbackScan(oldPath, item, newDisplayName)
+            }
+            rows > 0
+        } catch (e: Exception) {
+            Log.e("MediaRepository", "Rename failed (fallback): ${item.displayName} → $newDisplayName", e)
+            false
+        }
+    }
+
+    /**
+     * Last-resort scan when the filesystem rename path was not available.
+     * Probes both the known old path (if any) and the path derived from RELATIVE_PATH.
+     */
+    @Suppress("DEPRECATION")
+    private fun triggerFallbackScan(oldPath: String?, item: MediaItem, newDisplayName: String) {
+        try {
+            val pathsToScan = mutableListOf<String>()
+
+            // Old path (file is now renamed on disk but stale entry may linger)
+            if (!oldPath.isNullOrEmpty()) {
+                pathsToScan.add(oldPath)
+                // Compute new path from the old path's directory
+                val newPath = File(oldPath).parentFile?.let { File(it, newDisplayName).absolutePath }
+                if (newPath != null && !pathsToScan.contains(newPath)) pathsToScan.add(newPath)
+            }
+
+            // Independently computed path via RELATIVE_PATH (Android 10+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && item.relativePath.isNotEmpty()) {
+                val root = Environment.getExternalStorageDirectory().absolutePath
+                val computed = File(root, item.relativePath + newDisplayName).absolutePath
+                if (!pathsToScan.contains(computed)) pathsToScan.add(computed)
+            }
+
+            if (pathsToScan.isNotEmpty()) {
+                Log.d("MediaRepository", "Fallback scan: $pathsToScan")
+                MediaScannerConnection.scanFile(context, pathsToScan.toTypedArray(), null) { path, uri ->
+                    Log.d("MediaRepository", "Fallback scan done: $path → $uri")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("MediaRepository", "triggerFallbackScan failed", e)
+        }
+    }
+
+    /**
+     * Returns an [IntentSender] that, when launched, asks the user to grant
+     * write access to [item] so it can be renamed. Only available on Android 11+.
+     * After the user approves, call [renameMedia] to perform the actual rename.
+     */
+    fun createRenameWriteRequest(item: MediaItem): IntentSender? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                MediaStore.createWriteRequest(
+                    context.contentResolver,
+                    listOf(android.net.Uri.parse(item.uri))
+                ).intentSender
+            } catch (e: Exception) {
+                Log.e("MediaRepository", "createWriteRequest failed", e)
+                null
+            }
+        } else null
     }
 
     fun createDeleteRequest(items: List<MediaItem>): IntentSender? {

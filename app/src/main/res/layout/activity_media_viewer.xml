@@ -38,6 +38,14 @@
             android:src="@drawable/ic_open_gallery"
             android:contentDescription="Open in Gallery" />
 
+        <ImageButton
+            android:id="@+id/btnRename"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_rename"
+            android:contentDescription="Rename" />
+
         <Space
             android:layout_width="0dp"
             android:layout_height="wrap_content"

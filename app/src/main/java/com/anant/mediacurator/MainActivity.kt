@@ -239,8 +239,10 @@ class MainActivity : AppCompatActivity() {
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
-        if (adapter.selectionMode) exitSelectionMode()
-        else super.onBackPressed()
+        when {
+            adapter.selectionMode -> exitSelectionMode()
+            else                  -> super.onBackPressed()
+        }
     }
 
     private fun setupRecyclerView() {
@@ -660,6 +662,7 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
             permissions.add(Manifest.permission.READ_MEDIA_VIDEO)
+            permissions.add(Manifest.permission.READ_MEDIA_AUDIO)   // required for audio on API 33+
             // Still requested for PDF access on some devices, though often denied for media apps
             permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         } else {
@@ -800,7 +803,7 @@ class MainActivity : AppCompatActivity() {
     // ── Sticky header ─────────────────────────────────────────────────────────
 
     private fun updateStickyHeader(firstVisiblePos: Int = -1) {
-        // Flat mode has no tree headers — nothing to show.
+        // No sticky header in flat size-absolute mode
         if (viewModel.sortMode.value == SortMode.SIZE_ABSOLUTE) {
             binding.stickyHeader.isVisible = false
             return
@@ -1099,10 +1102,13 @@ Media Curator fixes this. Work through a month, mark it as done, and it steps ou
 
 Months you hide are never deleted — they stay fully accessible in your phone’s regular gallery, and you can unhide them here anytime.
 
-Built for people with years of accumulated photos, videos, and PDFs who want to clean up methodically - not just browse.
+Built for people with years of accumulated photos, videos, PDFs and audio files who want to clean up methodically — not just browse.
 ─────────────────────────────
+📊 STAT CARDS (top bar)
+Three cards always visible: 📷 Photos · 🎬 Videos · 🎵 Audio. A 📄 PDFs card appears when PDFs are present. Each card shows total count, hidden count, and size. Tap a card to toggle that type on/off — at least one must stay active.
+
 📂 BROWSING (Tree View)
-Years are shown collapsed. Tap a year to expand it and see its months. Tap a month to see its items. Tap again to collapse.
+Years are shown collapsed. Each year row shows a type breakdown (📷/🎬/🎵/📄 with counts), how many months have been curated, and thumbnail previews from the start and end of the year. Tap a year to expand it and see its months. Tap a month to see its items. Tap again to collapse.
 
 📌 STICKY HEADER
 While scrolling inside a year/month, a floating bar stays pinned at the top showing where you are. Tap it to collapse the open month (or the year, if no month is open).
@@ -1111,15 +1117,19 @@ While scrolling inside a year/month, a floating bar stays pinned at the top show
 Scroll to the bottom of any open month and tap "Hide this month". The month disappears from your gallery — files are NOT deleted, just hidden from this app.
 
 👁️ UNHIDING
-When you have hidden months, a bar appears at the top. Pick a year and month to restore it instantly. The app scrolls straight to it.
+When you have hidden months, a bar appears at the top. Pick a year from the first dropdown — the month list populates automatically. Select a month to restore it instantly. The app scrolls straight to it.
 
 🗑️ DELETING FILES
 Long-press any item to enter multi-select mode. Tap more items to add them to the selection. Tap Delete in the bar at the bottom.
 
+📦 MOVING FILES
+In multi-select mode, tap Move to relocate the selected files to a folder of your choice.
+
 ⚡ ONE-CLICK DELETE (menu)
 When enabled, a single tap on any item deletes it immediately — no confirmation. Use with care.
 
-🔢 SORT OPTIONS (menu → Sort)
+🔢 SORT ORDER
+Tap the subtitle under "Media Curator" in the toolbar (e.g. "Oldest first ▾") to change the sort order:
 • Newest / Oldest first — by capture date
 • Largest first (overall) — biggest files first, across all months
 • Largest first (per month) — months ordered by their total size

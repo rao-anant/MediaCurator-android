@@ -77,6 +77,17 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private val _deletionCompletedEvent = MutableLiveData<Boolean>()
     val deletionCompletedEvent: LiveData<Boolean> = _deletionCompletedEvent
 
+    // Rename flow — mirrors the delete permission pattern
+    private val _renamePermissionRequest = MutableLiveData<IntentSender?>()
+    val renamePermissionRequest: LiveData<IntentSender?> = _renamePermissionRequest
+
+    // Non-null non-empty = success (new name); empty string = failure; null = idle
+    private val _renameResult = MutableLiveData<String?>()
+    val renameResult: LiveData<String?> = _renameResult
+
+    private var pendingRenameItem: MediaItem? = null
+    private var pendingRenameNewName: String? = null
+
     private val _doneMonthsAvailable = MutableLiveData<List<MonthGroup>>()
     val doneMonthsAvailable: LiveData<List<MonthGroup>> = _doneMonthsAvailable
 
@@ -113,6 +124,12 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private var pendingItemsToDelete: List<MediaItem>? = null
     private var pendingBytesToFree: Long = 0L
     private var loadJob: Job? = null
+
+    // True while a rename is in progress (and for 5 s after, while MediaStore re-indexes).
+    // Suppresses the observer's debounced forceRefresh — the same guard pattern used for
+    // deletedFingerprintsInFlight — so the renamed file never briefly vanishes from the list.
+    @Volatile private var renameInFlight = false
+
     private var mediaObserver: ContentObserver? = null
 
     private var cachedRawMedia: List<MediaItem>? = null
@@ -570,6 +587,90 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         _deletePermissionRequest.value = null
     }
 
+    // ── Rename ────────────────────────────────────────────────────────────────
+
+    /**
+     * Rename [item] to [newDisplayName].
+     *
+     * Strategy (tries cheapest path first):
+     *   1. Direct ContentResolver.update() — works immediately when MANAGE_EXTERNAL_STORAGE
+     *      is granted or the file was created by this app.
+     *   2. If that fails on Android 11+, request write permission via createWriteRequest
+     *      (shows a one-tap system dialog).  [onRenamePermissionResult] completes the rename
+     *      after the user approves.
+     *   3. Posts a non-null [renameResult]: new name on success, "" on failure.
+     */
+    fun initiateRename(item: MediaItem, newDisplayName: String) {
+        renameInFlight = true   // raise guard BEFORE the IO work triggers MediaStore notifications
+        viewModelScope.launch(Dispatchers.IO) {
+            // Attempt direct rename first
+            if (repo.renameMedia(item, newDisplayName)) {
+                applyCachedRename(item, newDisplayName)   // schedules renameInFlight = false after 5 s
+                _renameResult.postValue(newDisplayName)
+                return@launch
+            }
+            // Direct failed — on Android 11+ request write permission and retry after approval
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val intentSender = repo.createRenameWriteRequest(item)
+                if (intentSender != null) {
+                    pendingRenameItem = item
+                    pendingRenameNewName = newDisplayName
+                    _renamePermissionRequest.postValue(intentSender)
+                    return@launch   // guard stays up; cleared in onRenamePermissionResult
+                }
+            }
+            renameInFlight = false   // all paths failed — nothing to protect
+            _renameResult.postValue("")
+        }
+    }
+
+    fun onRenamePermissionResult(granted: Boolean) {
+        val item = pendingRenameItem
+        val name = pendingRenameNewName
+        pendingRenameItem = null
+        pendingRenameNewName = null
+        _renamePermissionRequest.postValue(null)
+
+        if (!granted || item == null || name == null) {
+            renameInFlight = false   // user cancelled — nothing to protect
+            _renameResult.postValue("")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val success = repo.renameMedia(item, name)
+            if (success) applyCachedRename(item, name)   // schedules renameInFlight = false after 5 s
+            else renameInFlight = false
+            _renameResult.postValue(if (success) name else "")
+        }
+    }
+
+    /**
+     * Patch the renamed item's displayName in the in-memory cache, then schedule
+     * a forced refresh after the rename guard expires.
+     *
+     * Two-phase approach:
+     *   1. Immediately update cachedRawMedia so the item shows its new name without
+     *      waiting for MediaStore to finish re-indexing.
+     *   2. After 6 s (≥ observer's 3 s debounce + MediaScannerConnection latency),
+     *      drop the renameInFlight guard and do one forceRefresh — this replaces any
+     *      stale MediaStore ID (devices that delete+reinsert the row on rename) with
+     *      the fresh entry the scanner just created.
+     */
+    private fun applyCachedRename(item: MediaItem, newDisplayName: String) {
+        cachedRawMedia = cachedRawMedia?.map { m ->
+            if (m.id == item.id && m.type == item.type) m.copy(displayName = newDisplayName) else m
+        }
+        viewModelScope.launch {
+            delay(6_000)
+            renameInFlight = false
+            // Now that the guard is down, pull fresh data from MediaStore so any new
+            // MediaStore entry (possibly with a new ID) replaces the cache-patched one.
+            loadMedia(forceRefresh = true)
+        }
+    }
+
+    fun clearRenameResult() { _renameResult.value = null }
+
     private fun updateUiAfterDeletion(fingerprints: List<String>, bytesFreed: Long = 0L) {
         if (bytesFreed > 0L) _storageSavedEvent.postValue(bytesFreed)
 
@@ -648,8 +749,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
         mediaObserver = object : ContentObserver(handler) {
             override fun onChange(selfChange: Boolean) {
-                // Skip if we triggered this change via our own deletion.
+                // Skip if we triggered this change via our own deletion or rename.
                 if (deletedFingerprintsInFlight.isNotEmpty()) return
+                if (renameInFlight) return
                 handler.removeCallbacks(refresh)
                 handler.postDelayed(refresh, 3_000L)
             }
@@ -661,6 +763,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         )
         resolver.registerContentObserver(
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, mediaObserver!!
+        )
+        resolver.registerContentObserver(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, true, mediaObserver!!
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             resolver.registerContentObserver(

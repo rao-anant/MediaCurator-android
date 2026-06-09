@@ -308,6 +308,7 @@ class GalleryAdapter(
         private val bottomGradient: View = itemView.findViewById(R.id.bottomGradient)
         private val infoLabel: TextView = itemView.findViewById(R.id.tvDuration)
         private val dateLabel: TextView = itemView.findViewById(R.id.tvDate)
+        private val filenameLabel: TextView = itemView.findViewById(R.id.tvFilename)
         private var pdfJob: Job? = null
 
         fun bind(media: GalleryItem.Media) {
@@ -324,6 +325,11 @@ class GalleryAdapter(
                 imageView.setBackgroundColor(ContextCompat.getColor(itemView.context, R.color.photo_placeholder))
                 imageView.scaleType = ImageView.ScaleType.CENTER_INSIDE
                 typeIcon.visibility = View.GONE
+                // Show filename — strip extension so the label isn't cluttered with ".mp3" etc.
+                val dotIdx = item.displayName.lastIndexOf('.')
+                val baseName = if (dotIdx > 0) item.displayName.substring(0, dotIdx) else item.displayName
+                filenameLabel.text = baseName
+                filenameLabel.visibility = View.VISIBLE
             } else if (item.type == MediaType.PDF) {
                 Glide.with(itemView.context).clear(imageView)
                 imageView.setImageResource(R.drawable.ic_pdf)
@@ -388,7 +394,10 @@ class GalleryAdapter(
                 }
             }
 
-            // Size (and duration for videos) shown on every item.
+            // Hide filename label for everything except audio (set visible above for audio)
+            if (item.type != MediaType.AUDIO) filenameLabel.visibility = View.GONE
+
+            // Size (and duration for videos/audio) shown on every item.
             val sizeStr = fmtBytes(item.size)
             infoLabel.text = if ((item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) && item.duration > 0) {
                 "${formatDuration(item.duration)} · $sizeStr"

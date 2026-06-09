@@ -4,6 +4,11 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.text.InputType
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
@@ -21,6 +26,7 @@ import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.bumptech.glide.Glide
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.anant.mediacurator.databinding.ActivityMediaViewerBinding
 import com.anant.mediacurator.databinding.ItemViewerMediaBinding
 
@@ -32,12 +38,24 @@ class MediaViewerActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var updateProgressAction: Runnable? = null
 
+    // ID of the item currently being renamed. While non-negative:
+    //   • prevents the viewer from closing if flatMediaItems briefly goes empty
+    //     (MediaStore re-indexes the renamed file, postValue coalesces isLoading, so
+    //      the isEmpty+!isLoading guard fires even though the file still exists)
+    //   • restores the current page by ID after any list reload during the rename window
+    private var renamingItemId = -1L
+
     private val deleteLauncher =
         registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
             val success = result.resultCode == Activity.RESULT_OK
             viewModel.onDeletePermissionResult(success)
             // Don't finish here — flatMediaItems update will advance to the next item,
             // and the viewer closes automatically when the list becomes empty.
+        }
+
+    private val renameLauncher =
+        registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+            viewModel.onRenamePermissionResult(result.resultCode == Activity.RESULT_OK)
         }
 
     companion object {
@@ -54,6 +72,7 @@ class MediaViewerActivity : AppCompatActivity() {
         // Null it out so our vector's hardcoded white fill renders directly.
         binding.btnShare.imageTintList = null
         binding.btnDelete.imageTintList = null
+        binding.btnRename.imageTintList = null
 
         // Push the bottom toolbar above the system navigation bar
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
@@ -70,7 +89,9 @@ class MediaViewerActivity : AppCompatActivity() {
 
         viewModel.flatMediaItems.observe(this) { mediaItems ->
             if (mediaItems.isEmpty() && viewModel.isLoading.value == false) {
-                finish()
+                // Don't close the viewer while a rename is in progress — MediaStore may
+                // briefly not return the renamed file while it re-indexes it on disk.
+                if (renamingItemId == -1L) finish()
                 return@observe
             }
 
@@ -101,11 +122,27 @@ class MediaViewerActivity : AppCompatActivity() {
                 } else {
                     val prevPos = binding.viewPager.currentItem
                     adapter.updateItems(mediaItems)
-                    // Deleted item was the last one — back up to the new last item
-                    if (prevPos >= mediaItems.size) {
-                        val newPos = mediaItems.size - 1
-                        binding.viewPager.setCurrentItem(newPos, false)
-                        updateUIForItem(mediaItems[newPos])
+
+                    val rId = renamingItemId
+                    when {
+                        // Rename in progress: find the item by its original ID and stay on it.
+                        // The item may have shifted position if Android assigned a new MediaStore
+                        // ID for the renamed file, so ID-lookup is more reliable than prevPos.
+                        rId != -1L -> {
+                            val pos = mediaItems.indexOfFirst { it.id == rId }
+                            if (pos != -1) {
+                                binding.viewPager.setCurrentItem(pos, false)
+                                updateUIForItem(mediaItems[pos])
+                            }
+                            // If pos == -1 the file is still being indexed — keep waiting;
+                            // renamingItemId will be cleared when renameResult fires.
+                        }
+                        // Normal case (deletion, sort change, etc.) — back up if past end
+                        prevPos >= mediaItems.size -> {
+                            val newPos = mediaItems.size - 1
+                            binding.viewPager.setCurrentItem(newPos, false)
+                            updateUIForItem(mediaItems[newPos])
+                        }
                     }
                 }
             }
@@ -115,6 +152,23 @@ class MediaViewerActivity : AppCompatActivity() {
             intentSender?.let {
                 deleteLauncher.launch(IntentSenderRequest.Builder(it).build())
             }
+        }
+
+        viewModel.renamePermissionRequest.observe(this) { intentSender ->
+            intentSender?.let {
+                renameLauncher.launch(IntentSenderRequest.Builder(it).build())
+            }
+        }
+
+        viewModel.renameResult.observe(this) { result ->
+            result ?: return@observe   // null = idle, nothing to show
+            renamingItemId = -1L       // rename complete (success or failure) — lift the guard
+            if (result.isNotEmpty()) {
+                Toast.makeText(this, "Renamed to \"$result\"", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Rename failed", Toast.LENGTH_SHORT).show()
+            }
+            viewModel.clearRenameResult()
         }
 
         // deletionCompletedEvent no longer closes the viewer — the flatMediaItems
@@ -151,6 +205,13 @@ class MediaViewerActivity : AppCompatActivity() {
             if (::adapter.isInitialized && binding.viewPager.currentItem < adapter.itemCount) {
                 val currentItem = adapter.getItem(binding.viewPager.currentItem)
                 viewModel.deleteMedia(listOf(currentItem))
+            }
+        }
+
+        binding.btnRename.setOnClickListener {
+            if (::adapter.isInitialized && binding.viewPager.currentItem < adapter.itemCount) {
+                val currentItem = adapter.getItem(binding.viewPager.currentItem)
+                showRenameDialog(currentItem)
             }
         }
 
@@ -206,6 +267,69 @@ class MediaViewerActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopProgressUpdate()
+    }
+
+    private fun showRenameDialog(item: MediaItem) {
+        val fullName = item.displayName
+        val dotIdx = fullName.lastIndexOf('.')
+        val baseName = if (dotIdx > 0) fullName.substring(0, dotIdx) else fullName
+        val ext = if (dotIdx > 0) fullName.substring(dotIdx) else ""  // e.g. ".mp3" (includes dot)
+
+        val input = EditText(this).apply {
+            setText(baseName)
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        }
+
+        val pad = (24 * resources.displayMetrics.density).toInt()
+        val wrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, 0, pad, 0)
+            addView(input, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+            if (ext.isNotEmpty()) {
+                val hint = TextView(context).apply {
+                    text = "Extension \"$ext\" will be preserved"
+                    textSize = 12f
+                    alpha = 0.6f
+                    setPadding(0, 6, 0, 0)
+                }
+                addView(hint, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ))
+            }
+        }
+
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle("Rename")
+            .setView(wrapper)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Rename") { _, _ ->
+                val newBase = input.text.toString().trim()
+                if (newBase.isNotEmpty()) {
+                    renamingItemId = item.id   // raise guard before IO starts
+                    viewModel.initiateRename(item, newBase + ext)
+                }
+            }
+            .create()
+
+        // Force the keyboard to appear automatically when the dialog opens —
+        // more reliable than showSoftInput() for dialog windows.
+        dialog.window?.setSoftInputMode(
+            android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+        )
+        dialog.show()
+
+        // Select all text after the window is attached and focus is settled.
+        // Keyboard is already coming up via setSoftInputMode, so the user can
+        // just start typing to replace the highlighted name.
+        input.post {
+            input.requestFocus()
+            input.selectAll()
+        }
     }
 
     private fun shareMedia(item: MediaItem) {

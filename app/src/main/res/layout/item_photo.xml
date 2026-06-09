@@ -51,6 +51,23 @@
         android:singleLine="true"
         android:visibility="gone" />
 
+    <!-- Filename label: shown only for audio tiles, sits just above the duration line -->
+    <TextView
+        android:id="@+id/tvFilename"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="22dp"
+        android:paddingHorizontal="6dp"
+        android:paddingVertical="3dp"
+        android:background="#CC000000"
+        android:textColor="@android:color/white"
+        android:textSize="10sp"
+        android:maxLines="2"
+        android:ellipsize="middle"
+        android:gravity="center"
+        android:visibility="gone" />
+
     <!-- Size / duration (bottom-right): always shown -->
     <TextView
         android:id="@+id/tvDuration"
