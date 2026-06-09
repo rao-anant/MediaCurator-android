@@ -84,6 +84,12 @@ class PreferencesManager(context: Context) {
 
     fun isIncludeAudio(): Boolean = prefs.getBoolean(KEY_INCLUDE_AUDIO, true)
 
+    /** When false, PDF content indexing and BM25 search are completely disabled. */
+    fun isPdfContentSearchEnabled(): Boolean = prefs.getBoolean(KEY_PDF_CONTENT_SEARCH, true)
+    fun setPdfContentSearchEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_PDF_CONTENT_SEARCH, enabled).apply()
+    }
+
     fun monthKey(year: Int, month: Int): String {
         val m = if (month < 10) "0$month" else month.toString()
         return "$year-$m"
@@ -98,8 +104,9 @@ class PreferencesManager(context: Context) {
         private const val KEY_INCLUDE_VIDEO = "include_video"
         private const val KEY_INCLUDE_PDF = "include_pdf"
         private const val KEY_INCLUDE_AUDIO = "include_audio"
-        private const val KEY_EXPANDED_YEARS     = "expanded_years"
-        private const val KEY_EXPANDED_MONTHS    = "expanded_months"
-        private const val KEY_EXPANDED_SUBGROUPS = "expanded_subgroups"
+        private const val KEY_EXPANDED_YEARS       = "expanded_years"
+        private const val KEY_EXPANDED_MONTHS      = "expanded_months"
+        private const val KEY_EXPANDED_SUBGROUPS   = "expanded_subgroups"
+        private const val KEY_PDF_CONTENT_SEARCH   = "pdf_content_search"
     }
 }

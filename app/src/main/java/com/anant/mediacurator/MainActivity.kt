@@ -230,8 +230,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        invalidateOptionsMenu()
-        // We ALWAYS trigger a refresh on resume. The ViewModel handles caching and 
+        // Skip menu invalidation while search results are showing. Rebuilding the menu
+        // tears down the expanded SearchView, which fires onQueryTextChange("") →
+        // search("") → clearSearch() → search results are lost. The checkable items
+        // (One-Click Delete, PDF content search) are only relevant outside search mode,
+        // so skipping here costs nothing in practice.
+        if (viewModel.searchResults.value == null) {
+            invalidateOptionsMenu()
+        }
+        // We ALWAYS trigger a refresh on resume. The ViewModel handles caching and
         // immediate filtering of deleted items using the static flight set.
         // This is necessary because the MediaViewerActivity may have deleted files.
         viewModel.loadMedia(forceRefresh = true)
@@ -264,6 +271,17 @@ class MainActivity : AppCompatActivity() {
                         showToast("No PDF viewer found")
                     }
                 } else {
+                    // If we're in search mode, point the viewer at the search result list
+                    // so it swipes through results rather than the full gallery.
+                    // Without this, items from hidden months won't be found by ID in
+                    // flatMediaItems and the viewer falls back to position 0 (wrong item).
+                    val searchItems = viewModel.searchResults.value
+                    if (searchItems != null) {
+                        val mediaItems = searchItems
+                            .filterIsInstance<GalleryItem.Media>()
+                            .map { it.mediaItem }
+                        viewModel.setSearchFlatItems(mediaItems)
+                    }
                     val intent = Intent(this, MediaViewerActivity::class.java).apply {
                         putExtra(MediaViewerActivity.EXTRA_START_ID, item.id)
                     }
@@ -415,12 +433,34 @@ class MainActivity : AppCompatActivity() {
 
     private fun observeViewModel() {
         viewModel.galleryItems.observe(this) { items ->
+            if (viewModel.searchResults.value != null) return@observe  // search results take priority
             adapter.submitList(items)
             val isLoading = viewModel.isLoading.value ?: false
             binding.tvEmpty.isVisible = items.isEmpty() && !isLoading
             if (items.isEmpty() && !isLoading) binding.tvEmpty.text = resolveEmptyMessage()
-            // Re-evaluate sticky after list changes (expansion toggles don't always fire a scroll event)
             binding.recyclerView.post { updateStickyHeader() }
+        }
+
+        viewModel.searchResults.observe(this) { results ->
+            if (results == null) {
+                // Exiting search — restore gallery
+                binding.settingsBar.isVisible = true
+                updateRestoreLayoutVisibility()
+                binding.stickyHeader.visibility = android.view.View.GONE
+                viewModel.galleryItems.value?.let { adapter.submitList(it) }
+                binding.tvEmpty.isVisible = false
+            } else {
+                // In search mode
+                binding.settingsBar.isVisible = false
+                binding.restoreLayout.isVisible = false
+                binding.stickyHeader.visibility = android.view.View.GONE
+                adapter.submitList(results)
+                val isLoading = viewModel.isLoading.value ?: false
+                binding.tvEmpty.isVisible = results.isEmpty() && !isLoading
+                if (results.isEmpty() && !isLoading) {
+                    binding.tvEmpty.text = "No results — try different keywords\nor check for typos"
+                }
+            }
         }
         
         viewModel.isLoading.observe(this) { loading ->
@@ -428,16 +468,10 @@ class MainActivity : AppCompatActivity() {
             if (loading) binding.tvEmpty.isVisible = false  // never show empty state while loading
         }
         
-        viewModel.sortMode.observe(this) { mode ->
+        viewModel.sortMode.observe(this) { _ ->
             invalidateOptionsMenu()
-            supportActionBar?.subtitle = when (mode) {
-                SortMode.DATE_NEWEST       -> "Newest first ▾"
-                SortMode.DATE_OLDEST       -> "Oldest first ▾"
-                SortMode.SIZE_ABSOLUTE     -> "Largest first (overall) ▾"
-                SortMode.SIZE_WITHIN_MONTH -> "Largest first (per month) ▾"
-                SortMode.COUNT_PER_MONTH   -> "Most items first ▾"
-            }
-            // Unhide panel is a tree-view operation — hide it in flat mode
+            // Don't overwrite the subtitle if the SearchView is currently expanded
+            if (viewModel.searchResults.value == null) updateSortSubtitle()
             updateRestoreLayoutVisibility()
         }
 
@@ -536,6 +570,32 @@ class MainActivity : AppCompatActivity() {
         }
 
 
+        viewModel.pdfIndexOomEvent.observe(this) {
+            invalidateOptionsMenu()   // update the menu checkmark to reflect disabled state
+            com.google.android.material.snackbar.Snackbar
+                .make(
+                    binding.root,
+                    "PDF content search disabled — not enough memory. File name search still works.",
+                    com.google.android.material.snackbar.Snackbar.LENGTH_INDEFINITE
+                )
+                .setAction("Re-enable") {
+                    viewModel.setPdfContentSearchEnabled(true)
+                    invalidateOptionsMenu()
+                }
+                .show()
+        }
+
+        viewModel.pdfIndexProgress.observe(this) { progress ->
+            // Show indexing progress in the toolbar subtitle.
+            // Skip if we're in search mode (subtitle already cleared) or after completion.
+            if (viewModel.searchResults.value != null) return@observe
+            when {
+                progress == null || progress.isDone -> updateSortSubtitle()
+                progress.isActive ->
+                    supportActionBar?.subtitle = "Indexing PDFs… ${progress.indexed} / ${progress.total}"
+            }
+        }
+
         viewModel.scrollToTopEvent.observe(this) {
             binding.recyclerView.scrollToPosition(0)
             binding.appBarLayout.setExpanded(true, false)
@@ -557,7 +617,54 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.menu_main, menu)
+        setupSearchView(menu)
         return true
+    }
+
+    private fun setupSearchView(menu: Menu) {
+        val searchItem = menu.findItem(R.id.action_search) ?: return
+        val searchView = searchItem.actionView as? androidx.appcompat.widget.SearchView ?: return
+
+        searchView.queryHint = "Labels, filenames…"
+        searchView.maxWidth  = Int.MAX_VALUE   // allow full toolbar width when expanded
+
+        searchView.setOnQueryTextListener(object : androidx.appcompat.widget.SearchView.OnQueryTextListener {
+            override fun onQueryTextSubmit(query: String?): Boolean {
+                searchView.clearFocus()
+                return true
+            }
+            override fun onQueryTextChange(newText: String?): Boolean {
+                viewModel.search(newText.orEmpty())
+                return true
+            }
+        })
+
+        searchItem.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
+            override fun onMenuItemActionExpand(item: MenuItem): Boolean {
+                // Hide the sort subtitle while searching to make room
+                supportActionBar?.subtitle = null
+                return true
+            }
+            override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
+                viewModel.clearSearch()
+                // Restore sort subtitle
+                updateSortSubtitle()
+                return true
+            }
+        })
+    }
+
+    private fun updateSortSubtitle() {
+        // Don't overwrite while PDF indexing progress is being shown
+        val progress = viewModel.pdfIndexProgress.value
+        if (progress != null && progress.isActive) return
+        supportActionBar?.subtitle = when (viewModel.sortMode.value ?: SortMode.DATE_OLDEST) {
+            SortMode.DATE_NEWEST       -> "Newest first ▾"
+            SortMode.DATE_OLDEST       -> "Oldest first ▾"
+            SortMode.SIZE_ABSOLUTE     -> "Largest first (overall) ▾"
+            SortMode.SIZE_WITHIN_MONTH -> "Largest first (per month) ▾"
+            SortMode.COUNT_PER_MONTH   -> "Most items first ▾"
+        }
     }
 
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
@@ -570,6 +677,10 @@ class MainActivity : AppCompatActivity() {
             oneClickItem.isChecked = hasManageMediaPermission()
         } else {
             oneClickItem.isVisible = false
+        }
+        menu.findItem(R.id.action_pdf_content_search)?.let {
+            it.isVisible = !inSelection
+            it.isChecked = viewModel.isPdfContentSearchEnabled()
         }
         return super.onPrepareOptionsMenu(menu)
     }
@@ -591,6 +702,31 @@ class MainActivity : AppCompatActivity() {
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
+            true
+        }
+        R.id.action_pdf_content_search -> {
+            val currentlyEnabled = viewModel.isPdfContentSearchEnabled()
+            if (currentlyEnabled) {
+                // Disabling — warn the user
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Disable PDF content search?")
+                    .setMessage(
+                        "Background indexing will stop and PDF results will be matched " +
+                        "by filename only.\n\nThe existing index files are kept — " +
+                        "re-enabling will pick up where it left off."
+                    )
+                    .setPositiveButton("Disable") { _, _ ->
+                        viewModel.setPdfContentSearchEnabled(false)
+                        invalidateOptionsMenu()
+                        showToast("PDF content search disabled")
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            } else {
+                viewModel.setPdfContentSearchEnabled(true)
+                invalidateOptionsMenu()
+                showToast("PDF content search enabled — indexing will resume")
+            }
             true
         }
         R.id.action_help -> { showHelpDialog(); true }
@@ -1135,10 +1271,19 @@ Tap the subtitle under "Media Curator" in the toolbar (e.g. "Oldest first ▾") 
 • Largest first (per month) — months ordered by their total size
 • Most items first — months with the most files appear at the top
 
+🔍 SEARCH (toolbar search icon)
+Tap the search icon to search by filename or photo labels (things ML Kit sees in your photos — dog, beach, car…). Fuzzy matching handles typos: "flwoer" finds "flower.png".
+
+PDF content is also indexed and searched. The first 5 pages of each PDF are indexed in the background — a counter in the toolbar subtitle shows progress. Results from PDF content show a "📄 content (first 5 pg)" badge. For long PDFs (> 5 pages) the content beyond page 5 is not indexed.
+
+Multi-word queries use AND logic: "dog beach" only returns items tagged with BOTH concepts.
+
 💾 BACKUP (menu → Export / Import)
 Hidden-month state is auto-saved to mediacurator_hidden.json in your Downloads folder after every hide/unhide. It survives app-data clears and reinstalls — just reinstall and the state restores automatically. Use Export / Import to move your state to another device.
 
-ℹ️ Note: mediacurator_hidden.json is NOT deleted when you uninstall the app. Delete it manually from your Downloads folder if you want a completely clean slate.
+The PDF content index is also backed up automatically to mediacurator_pdf_index.json.gz in Downloads after indexing completes. On a fresh install, the index is restored from this file — so you don't have to re-index all your PDFs.
+
+ℹ️ Note: mediacurator_hidden.json and mediacurator_pdf_index.json.gz are NOT deleted when you uninstall the app. Delete them manually from your Downloads folder if you want a completely clean slate.
         """.trimIndent()
 
         val tv = android.widget.TextView(this).apply {

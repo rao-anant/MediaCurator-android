@@ -21,12 +21,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Collections
 import java.util.Date
 import java.util.LinkedHashMap
 import java.util.Locale
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 
 class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = MediaRepository(app)
@@ -108,6 +111,42 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private val _autoRestorePrompt = MutableLiveData<Set<String>?>()
     val autoRestorePrompt: LiveData<Set<String>?> = _autoRestorePrompt
 
+    // ── Image labels ──────────────────────────────────────────────────────────
+    // Map of MediaItem.id → list of ML Kit label strings (e.g. ["Beach","Sky"]).
+    // Populated lazily in the background after each media load; surviving labels from
+    // the LabelCache are merged in immediately on first load so the UI shows them
+    // without waiting for the labeler to finish.
+    // Map of MediaItem.id → (label → confidence), e.g. {42L: {"Dog": 0.89, "Beach": 0.76}}
+    private val _photoLabels = MutableLiveData<Map<Long, Map<String, Float>>>(emptyMap())
+    val photoLabels: LiveData<Map<Long, Map<String, Float>>> = _photoLabels
+
+    val labelCache = LabelCache(app)
+    private var labelingJob: Job? = null
+
+    val pdfIndexStore = PdfIndexStore(app)
+    private var pdfIndexingJob: Job? = null
+
+    // In-memory BM25 index — built lazily on first search, invalidated when index changes.
+    @Volatile private var bm25IndexCache: PdfBm25Index? = null
+
+    // Progress of the background PDF indexing run.
+    // Null = no run needed (all already indexed or no PDFs).
+    private val _pdfIndexProgress = MutableLiveData<PdfIndexProgress?>(null)
+    val pdfIndexProgress: LiveData<PdfIndexProgress?> = _pdfIndexProgress
+
+    // Fired (once) when the indexing job is killed by an OutOfMemoryError.
+    // MainActivity observes this to show a Snackbar and offer the settings toggle.
+    private val _pdfIndexOomEvent = MutableLiveData<Unit>()
+    val pdfIndexOomEvent: LiveData<Unit> = _pdfIndexOomEvent
+
+    // ── Search ────────────────────────────────────────────────────────────────
+    // Null = not in search mode (gallery shows normally).
+    // Non-null = active search; list may be empty if nothing matched.
+    private val _searchResults = MutableLiveData<List<GalleryItem>?>(null)
+    val searchResults: LiveData<List<GalleryItem>?> = _searchResults
+
+    private var searchJob: Job? = null
+
     companion object {
         // Shared across Activity instances (MainActivity and ViewerActivity)
         // to ensure consistent UI filtering during the lag between file deletion
@@ -118,7 +157,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         fun getFingerprint(item: MediaItem): String = "${item.displayName}_${item.size}"
 
         // Fixed filename so we can always overwrite / locate the single live backup.
-        const val AUTO_BACKUP_FILENAME = "mediacurator_hidden.json"
+        const val AUTO_BACKUP_FILENAME     = "mediacurator_hidden.json"
+        const val PDF_INDEX_BACKUP_FILENAME = "mediacurator_pdf_index.json.gz"
     }
 
     private var pendingItemsToDelete: List<MediaItem>? = null
@@ -133,6 +173,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private var mediaObserver: ContentObserver? = null
 
     private var cachedRawMedia: List<MediaItem>? = null
+    // Saved copy of the last gallery flat list so clearSearch() can restore it
+    private var galleryFlatItems: List<MediaItem> = emptyList()
     private var structuralVersion = 0
 
     // Items deleted during this session — NEVER cleared while the app is running.
@@ -462,10 +504,21 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             // cancellation early) runs to completion and overwrites job2's correct results.
             if (!isActive) return@launch
 
+            galleryFlatItems = flatForViewer   // saved so clearSearch() can restore it
             _flatMediaItems.postValue(flatForViewer)
             _galleryItems.postValue(galleryItems)
             _doneMonthsAvailable.postValue(doneGroups)
             _isLoading.postValue(false)
+
+            // Kick off background indexing whenever raw media is freshly fetched.
+            if (forceRefresh || cachedRawMedia == null) {
+                val images = filteredMedia.filter { it.type == MediaType.IMAGE }
+                val pdfs   = filteredMedia.filter { it.type == MediaType.PDF }
+                withContext(Dispatchers.Main) {
+                    startLabelingInBackground(images)
+                    startPdfIndexingInBackground(pdfs)
+                }
+            }
 
             // Fire scroll events after list is posted (both deliver on main thread in order)
             if (pendingScrollToTop) {
@@ -506,6 +559,13 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                // Clean up PDF index for any deleted PDFs
+                val deletedPdfs = items.filter { it.type == MediaType.PDF }
+                if (deletedPdfs.isNotEmpty()) {
+                    deletedPdfs.forEach { pdf -> pdfIndexStore.deleteEntry(pdf.id) }
+                    bm25IndexCache = null
+                }
+
                 val resolver = getApplication<Application>().contentResolver
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -774,10 +834,427 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── Search ────────────────────────────────────────────────────────────────
+
+    /**
+     * Run a fuzzy search across ML labels and filenames for [query].
+     * Results are posted to [searchResults]; the gallery stays hidden while
+     * results is non-null.  Cancels any in-flight search before starting a new one.
+     */
+    fun search(query: String) {
+        searchJob?.cancel()
+        if (query.isBlank()) { clearSearch(); return }
+
+        searchJob = viewModelScope.launch {
+            val allMedia = cachedRawMedia ?: return@launch
+            val labels   = _photoLabels.value ?: emptyMap()
+
+            // Build/reuse the BM25 index (loads from ~N small files the first time).
+            // Skip entirely when PDF content search is disabled by the user.
+            val bm25: PdfBm25Index? = withContext(Dispatchers.IO) {
+                if (prefs.isPdfContentSearchEnabled() && allMedia.any { it.type == MediaType.PDF })
+                    getOrBuildBm25Index()   // returns null on OOM (auto-disables + notifies user)
+                else null
+            }
+
+            val results = withContext(Dispatchers.Default) {
+                SearchEngine.search(query, allMedia, labels, bm25)
+            }
+
+            val items = results.mapIndexed { idx, r ->
+                GalleryItem.Media(
+                    mediaItem         = r.item,
+                    monthKey          = "",
+                    indexInMonth      = idx,
+                    dateLabel         = r.matchReason.ifBlank { null },
+                    structuralVersion = 0
+                )
+            }
+            _searchResults.postValue(items)
+        }
+    }
+
+    /**
+     * Point [flatMediaItems] at [items] so [MediaViewerActivity] swipes through
+     * search results instead of the full gallery list.  Called from MainActivity
+     * just before opening the viewer from a search result tap.
+     */
+    fun setSearchFlatItems(items: List<MediaItem>) {
+        _flatMediaItems.value = items
+    }
+
+    /** Exit search mode and restore normal gallery. */
+    fun clearSearch() {
+        searchJob?.cancel()
+        _searchResults.value = null
+        _flatMediaItems.value = galleryFlatItems  // restore gallery swipe list
+    }
+
+    // ── Labeling pipeline ─────────────────────────────────────────────────────
+
+    /**
+     * Kick off background labeling for any IMAGE items that aren't yet in the cache.
+     *
+     * Strategy:
+     *  1. Merge currently-cached labels into [_photoLabels] immediately (zero-latency
+     *     for items the user has seen before).
+     *  2. Collect unlabeled image IDs and run ML Kit inference on them in batches of 10,
+     *     posting incremental updates to [_photoLabels] as each batch finishes.
+     *
+     * The job is cancelled and restarted whenever a new media load runs, so stale
+     * labeling work from a previous load never stomps on fresh results.
+     */
+    fun startLabelingInBackground(images: List<MediaItem>) {
+        labelingJob?.cancel()
+        labelingJob = viewModelScope.launch(Dispatchers.IO) {
+            // 1. Seed LiveData with whatever is already cached
+            val cached = labelCache.loadAll().toMutableMap()
+            if (cached.isNotEmpty()) _photoLabels.postValue(cached.toMap())
+
+            // 2. Identify images we haven't labeled yet
+            val unlabeled = images.filter { it.type == MediaType.IMAGE && !labelCache.hasEntry(it.id) }
+            if (unlabeled.isEmpty()) return@launch
+
+            Log.d("GalleryViewModel", "Labeling ${unlabeled.size} new images in background")
+
+            // 3. Process in batches of 10; yield between batches to stay responsive
+            val BATCH = 10
+            for (batch in unlabeled.chunked(BATCH)) {
+                if (!isActive) break
+                for (item in batch) {
+                    if (!isActive) break
+                    val labels = repo.labelImage(item)   // now Map<String, Float>
+                    labelCache.saveLabels(item.id, labels)
+                    if (labels.isNotEmpty()) cached[item.id] = labels
+                }
+                _photoLabels.postValue(cached.toMap())
+                kotlinx.coroutines.delay(50)
+            }
+            Log.d("GalleryViewModel", "Labeling complete. ${cached.size} images labeled.")
+        }
+    }
+
+    /**
+     * Build a BM25 word-count index for any PDFs not yet in [pdfIndexStore].
+     *
+     * Steps:
+     *  1. If the local index is empty, attempt a restore from the Downloads backup
+     *     (covers fresh-install / app-data-clear / reinstall scenarios).
+     *  2. Filter to PDFs that still lack an index entry.
+     *  3. Extract word counts via PDFBox (first 5 pages) and persist each result.
+     *  4. Post progress updates to [pdfIndexProgress] as each PDF completes.
+     *  5. When finished, save a gzip-compressed backup to Downloads and invalidate
+     *     the in-memory BM25 index cache so the next search picks up the new data.
+     *
+     * Progress is null while idle and non-null during an active run.
+     */
+    fun startPdfIndexingInBackground(pdfs: List<MediaItem>) {
+        pdfIndexingJob?.cancel()
+        if (pdfs.isEmpty() || !prefs.isPdfContentSearchEnabled()) {
+            _pdfIndexProgress.postValue(null)
+            return
+        }
+
+        pdfIndexingJob = viewModelScope.launch(Dispatchers.IO) {
+            // Step 1: restore from Downloads backup if local index is empty
+            // countEntries() is cheap (filesystem metadata only — no file contents loaded)
+            val existingCount = pdfIndexStore.countEntries()
+            if (existingCount == 0 && pdfs.isNotEmpty()) {
+                restorePdfIndexFromBackup(pdfs)
+            }
+
+            // Step 2: find what still needs indexing
+            val unindexed = pdfs.filter { !pdfIndexStore.hasEntry(it.id) }
+            if (unindexed.isEmpty()) {
+                _pdfIndexProgress.postValue(null)
+                return@launch
+            }
+
+            val total = unindexed.size
+            var indexed = 0
+            Log.d("GalleryViewModel", "PDF indexing: $total unindexed PDFs")
+            _pdfIndexProgress.postValue(PdfIndexProgress(0, total, false))
+
+            // Step 3 & 4: extract and persist, with progress updates.
+            //
+            // Two-level OOM defence:
+            //   a) extractPdfWords() catches Throwable per-PDF → returns empty map, continues.
+            //   b) The outer try/catch here catches OOM that strikes the loop infrastructure
+            //      itself (writing a words file, allocating progress objects, etc.).
+            //      On OOM: PDF content search is auto-disabled and the user is notified.
+            //
+            // Batching: PDFBox accumulates font/image objects across calls faster than GC
+            // can collect without a suspension point.  10 PDFs + 200 ms gives GC time.
+            try {
+                for (batch in unindexed.chunked(10)) {
+                    if (!isActive) break
+                    for (item in batch) {
+                        if (!isActive) break
+                        val words = repo.extractPdfWords(item)   // safe — catches OOM internally
+                        if (words.isEmpty()) pdfIndexStore.markEmpty(item.id)
+                        else pdfIndexStore.saveWordCounts(item.id, words)
+                        bm25IndexCache = null
+                        indexed++
+                        _pdfIndexProgress.postValue(PdfIndexProgress(indexed, total, false))
+                    }
+                    delay(200)   // suspension point — lets GC reclaim PDFBox objects
+                }
+            } catch (oom: OutOfMemoryError) {
+                Log.e("GalleryViewModel", "PDF indexing OOM after $indexed/$total — auto-disabling", oom)
+                prefs.setPdfContentSearchEnabled(false)
+                bm25IndexCache = null
+                _pdfIndexProgress.postValue(null)
+                _pdfIndexOomEvent.postValue(Unit)
+                return@launch
+            }
+
+            Log.d("GalleryViewModel", "PDF indexing complete. $indexed / $total processed.")
+            _pdfIndexProgress.postValue(PdfIndexProgress(indexed, total, true))
+
+            // Step 5: backup after a successful complete run
+            if (isActive) savePdfIndexBackup(pdfs)
+        }
+    }
+
+    // ── BM25 index cache ──────────────────────────────────────────────────────
+
+    private fun getOrBuildBm25Index(): PdfBm25Index? {
+        bm25IndexCache?.let { return it }
+        return try {
+            val entries = pdfIndexStore.loadAll()
+            PdfBm25Index(entries).also { bm25IndexCache = it }
+        } catch (oom: OutOfMemoryError) {
+            Log.e("GalleryViewModel", "BM25 index build OOM — auto-disabling PDF content search", oom)
+            prefs.setPdfContentSearchEnabled(false)
+            bm25IndexCache = null
+            _pdfIndexOomEvent.postValue(Unit)
+            null
+        }
+    }
+
+    // ── PDF index backup / restore ────────────────────────────────────────────
+
+    /**
+     * Serialise the PDF word-count index as gzip-compressed JSON and write it to
+     * [PDF_INDEX_BACKUP_FILENAME] in the user's Downloads folder.
+     *
+     * **Memory-efficient streaming design:**
+     * Uses Gson's [JsonWriter] to stream JSON directly into a [GZIPOutputStream]
+     * piped to a [ContentResolver] output stream.  Each PDF's word counts are
+     * fetched one at a time via [PdfIndexStore.getWordCounts] and written
+     * immediately — the entire dataset is never held in memory at once.
+     * Peak extra memory ≈ one PDF's word counts (~6 KB) + I/O buffers (~64 KB).
+     *
+     * JSON format:
+     * {
+     *   "version": 1,
+     *   "exportedAt": "2026-06-09T10:30:00",
+     *   "pageLimit": 5,
+     *   "pdfs": {
+     *     "<displayName>_<size>": {"contract": 5, "invoice": 3},
+     *     "<displayName>_<size>": {}   ← empty = no-text sentinel
+     *   }
+     * }
+     */
+    private fun savePdfIndexBackup(allPdfs: List<MediaItem>) {
+        try {
+            val app      = getApplication<Application>()
+            val resolver = app.contentResolver
+            val ts       = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date())
+
+            /** Stream JSON → GZIP → [out]. */
+            fun writeTo(out: java.io.OutputStream) {
+                GZIPOutputStream(out).use { gzip ->
+                    com.google.gson.stream.JsonWriter(
+                        java.io.OutputStreamWriter(gzip, Charsets.UTF_8)
+                    ).use { jw ->
+                        jw.beginObject()
+                        jw.name("version").value(1L)
+                        jw.name("exportedAt").value(ts)
+                        jw.name("pageLimit").value(5L)
+                        jw.name("pdfs")
+                        jw.beginObject()
+                        var written = 0
+                        for (item in allPdfs) {
+                            // getWordCounts reads one small file — never the whole set
+                            val counts = pdfIndexStore.getWordCounts(item.id) ?: continue
+                            jw.name(getFingerprint(item))
+                            jw.beginObject()
+                            for ((word, count) in counts) jw.name(word).value(count.toLong())
+                            jw.endObject()
+                            written++
+                        }
+                        jw.endObject()  // pdfs
+                        jw.endObject()  // root
+                        Log.i("GalleryViewModel", "PDF backup: streamed $written entries")
+                    }
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val collection = MediaStore.Downloads.getContentUri("external")
+                try {
+                    resolver.delete(collection,
+                        "${MediaStore.Downloads.DISPLAY_NAME} = ?",
+                        arrayOf(PDF_INDEX_BACKUP_FILENAME))
+                    val base = PDF_INDEX_BACKUP_FILENAME.removeSuffix(".json.gz")
+                    resolver.delete(collection,
+                        "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
+                        arrayOf("$base (%).json.gz"))
+                } catch (_: Exception) {}
+
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, PDF_INDEX_BACKUP_FILENAME)
+                    put(MediaStore.Downloads.MIME_TYPE, "application/gzip")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val uri = resolver.insert(collection, values) ?: return
+                resolver.openOutputStream(uri)?.use { writeTo(it) }
+            } else {
+                @Suppress("DEPRECATION")
+                val file = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    PDF_INDEX_BACKUP_FILENAME
+                )
+                file.parentFile?.mkdirs()
+                file.outputStream().use { writeTo(it) }
+            }
+        } catch (e: Exception) {
+            Log.e("GalleryViewModel", "PDF index backup failed", e)
+        }
+    }
+
+    /**
+     * Attempt to restore the PDF word-count index from the Downloads backup.
+     * Called at the start of the first indexing run if the local index is empty.
+     *
+     * **Memory-efficient streaming design:**
+     * Opens an [InputStream] directly from MediaStore (or the file) and parses
+     * JSON via Gson's [JsonReader] without ever loading the full JSON string or
+     * building a JSONObject tree.  Each PDF's data is saved to [PdfIndexStore]
+     * immediately; only one PDF's word counts are in memory at a time.
+     */
+    private fun restorePdfIndexFromBackup(currentPdfs: List<MediaItem>) {
+        try {
+            val app      = getApplication<Application>()
+            val resolver = app.contentResolver
+
+            // Build fingerprint → MediaItem lookup (cheap: ~130 KB for 1300 PDFs)
+            val fingerprintToItem = currentPdfs.associateBy { getFingerprint(it) }
+
+            /** Parse the GZIP JSON stream from [inputStream] and restore entries. */
+            fun restoreFrom(inputStream: java.io.InputStream): Int {
+                var restored = 0
+                GZIPInputStream(inputStream).use { gzip ->
+                    com.google.gson.stream.JsonReader(
+                        java.io.InputStreamReader(gzip, Charsets.UTF_8)
+                    ).use { jr ->
+                        jr.beginObject()
+                        while (jr.hasNext()) {
+                            if (jr.nextName() == "pdfs") {
+                                jr.beginObject()
+                                while (jr.hasNext()) {
+                                    val fingerprint = jr.nextName()
+                                    val wordCounts  = HashMap<String, Int>()
+                                    jr.beginObject()
+                                    while (jr.hasNext()) {
+                                        wordCounts[jr.nextName()] = jr.nextInt()
+                                    }
+                                    jr.endObject()
+
+                                    // Save immediately — wordCounts goes out of scope after this block
+                                    val item = fingerprintToItem[fingerprint] ?: continue
+                                    if (wordCounts.isEmpty()) pdfIndexStore.markEmpty(item.id)
+                                    else pdfIndexStore.saveWordCounts(item.id, wordCounts)
+                                    restored++
+                                }
+                                jr.endObject()
+                            } else {
+                                jr.skipValue()
+                            }
+                        }
+                        jr.endObject()
+                    }
+                }
+                return restored
+            }
+
+            val restored: Int
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val collection = MediaStore.Downloads.getContentUri("external")
+                val uri = resolver.query(
+                    collection,
+                    arrayOf(MediaStore.Downloads._ID),
+                    "${MediaStore.Downloads.DISPLAY_NAME} = ?",
+                    arrayOf(PDF_INDEX_BACKUP_FILENAME),
+                    "${MediaStore.Downloads.DATE_MODIFIED} DESC"
+                )?.use { cursor ->
+                    if (!cursor.moveToFirst()) return
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
+                    android.content.ContentUris.withAppendedId(collection, id)
+                } ?: run {
+                    // Fallback: direct file path (needs MANAGE_EXTERNAL_STORAGE)
+                    @Suppress("DEPRECATION")
+                    val file = File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                        PDF_INDEX_BACKUP_FILENAME
+                    )
+                    if (!file.exists()) return
+                    restored = restoreFrom(file.inputStream())
+                    Log.i("GalleryViewModel", "PDF index restored (file path): $restored / ${currentPdfs.size}")
+                    return
+                }
+                resolver.openInputStream(uri)?.use { restored = restoreFrom(it) } ?: return
+            } else {
+                @Suppress("DEPRECATION")
+                val file = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    PDF_INDEX_BACKUP_FILENAME
+                )
+                if (!file.exists()) return
+                restored = restoreFrom(file.inputStream())
+            }
+
+            Log.i("GalleryViewModel", "PDF index restored: $restored / ${currentPdfs.size} matched")
+        } catch (e: Exception) {
+            Log.e("GalleryViewModel", "PDF index restore failed", e)
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
+        labelingJob?.cancel()
+        pdfIndexingJob?.cancel()
+        repo.closeLabeler()
         mediaObserver?.let {
             getApplication<Application>().contentResolver.unregisterContentObserver(it)
+        }
+    }
+
+    /** Discard the cached BM25 index so the next search rebuilds it. */
+    fun invalidateBm25Index() {
+        bm25IndexCache = null
+    }
+
+    fun isPdfContentSearchEnabled(): Boolean = prefs.isPdfContentSearchEnabled()
+
+    /**
+     * Enable or disable PDF content indexing and BM25 search.
+     * When disabled: background indexing stops immediately, BM25 is never built,
+     * and PDF results come from filename matching only.
+     * When re-enabled: indexing resumes on the next loadMedia() call.
+     */
+    fun setPdfContentSearchEnabled(enabled: Boolean) {
+        prefs.setPdfContentSearchEnabled(enabled)
+        if (!enabled) {
+            pdfIndexingJob?.cancel()
+            bm25IndexCache = null
+            _pdfIndexProgress.postValue(null)
+        } else {
+            // Trigger a fresh indexing pass with the current media list
+            cachedRawMedia?.filter { it.type == MediaType.PDF }?.let {
+                startPdfIndexingInBackground(it)
+            }
         }
     }
 

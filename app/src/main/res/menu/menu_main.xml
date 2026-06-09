@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_search"
+        android:title="Search"
+        android:icon="@android:drawable/ic_menu_search"
+        app:showAsAction="always|collapseActionView"
+        app:actionViewClass="androidx.appcompat.widget.SearchView" />
+
     <item android:id="@+id/action_backup" android:title="Export / Import"
         app:showAsAction="never" />
     <item android:id="@+id/action_refresh" android:title="Refresh"
@@ -12,6 +19,10 @@
         app:iconTint="?attr/colorOnSurface" />
     <item android:id="@+id/action_one_click_delete"
         android:title="One-Click Delete"
+        android:checkable="true"
+        app:showAsAction="never" />
+    <item android:id="@+id/action_pdf_content_search"
+        android:title="PDF content search"
         android:checkable="true"
         app:showAsAction="never" />
     <item android:id="@+id/action_help"

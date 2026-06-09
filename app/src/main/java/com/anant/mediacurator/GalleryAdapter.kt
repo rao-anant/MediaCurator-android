@@ -36,6 +36,7 @@ class GalleryAdapter(
         const val TYPE_FOOTER      = 3
         const val TYPE_SUB_HEADER  = 4
 
+
         fun fmtBytes(b: Long): String = when {
             b >= 1_073_741_824L -> "%.1f GB".format(b / 1_073_741_824.0)
             b >= 1_048_576L     -> "%.1f MB".format(b / 1_048_576.0)
@@ -94,6 +95,7 @@ class GalleryAdapter(
 
     var currentList: List<GalleryItem> = emptyList()
         private set
+
 
     var selectionMode = false
         private set
@@ -394,7 +396,7 @@ class GalleryAdapter(
                 }
             }
 
-            // Hide filename label for everything except audio (set visible above for audio)
+            // Filename label: audio only (track name). Labels are index-only — not shown on thumbnails.
             if (item.type != MediaType.AUDIO) filenameLabel.visibility = View.GONE
 
             // Size (and duration for videos/audio) shown on every item.
@@ -435,5 +437,6 @@ class GalleryAdapter(
                 true
             }
         }
+
     }
 }

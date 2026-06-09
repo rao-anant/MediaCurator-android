@@ -16,10 +16,10 @@
 -keep class * implements com.google.gson.JsonDeserializer
 
 # ── App data classes serialised by Gson / passed via Intent ──────────────────
--keep class com.photocurator.MediaItem     { *; }
--keep class com.photocurator.MonthGroup    { *; }
--keep class com.photocurator.MediaType     { *; }
--keep class com.photocurator.SortMode      { *; }
+-keep class com.mediacurator.MediaItem     { *; }
+-keep class com.mediacurator.MonthGroup    { *; }
+-keep class com.mediacurator.MediaType     { *; }
+-keep class com.mediacurator.SortMode      { *; }
 
 # ── PhotoView (chrisbanes) ────────────────────────────────────────────────────
 -keep class com.github.chrisbanes.photoview.** { *; }

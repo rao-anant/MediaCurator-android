@@ -1,5 +1,18 @@
 plugins {
     id 'org.gradle.toolchains.foojay-resolver-convention' version '0.10.0'
 }
+
+// Gradle 8+ recommended approach: declare repositories here rather than in
+// allprojects{} blocks in build.gradle.  PREFER_SETTINGS means these take
+// priority but project-level declarations (if any) still work as a fallback.
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+    }
+}
+
 rootProject.name = "MediaCurator"
 include ':app'

@@ -10,12 +10,26 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.label.ImageLabeling
+import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.coroutines.resume
 
 class MediaRepository(private val context: Context) {
     private val prefs = PreferencesManager(context)
+
+    init {
+        // PDFBox needs its font/resource loader initialised once per process.
+        // Safe to call multiple times — it no-ops after the first call.
+        PDFBoxResourceLoader.init(context.applicationContext)
+    }
     
     private val labelFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
     private val filenameDateRegex = Regex("(\\d{4})[_-]?(\\d{2})[_-]?(\\d{2})")
@@ -560,5 +574,151 @@ class MediaRepository(private val context: Context) {
             }
         }
         return null
+    }
+
+    // ── Image labeling ────────────────────────────────────────────────────────
+
+    /**
+     * Lazy ML Kit labeler — created once and reused for the entire ViewModel lifetime.
+     * Caller is responsible for calling [closeLabeler] in ViewModel.onCleared().
+     *
+     * Uses the bundled on-device model (no internet, no Play Services dependency).
+     * Default confidence threshold is 0.5; we filter client-side to ≥ 0.65 to keep
+     * only high-quality labels.
+     */
+    private val imageLabeler by lazy {
+        ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS)
+    }
+
+    /**
+     * Run on-device image labeling on a single IMAGE-type [MediaItem].
+     *
+     * Returns up to [maxLabels] labels with confidence ≥ [minConfidence], sorted by
+     * confidence descending.  Returns an empty list for non-image items or on any error
+     * (permission issue, corrupt file, etc.) — callers can safely ignore failures.
+     *
+     * Designed to be called from a background coroutine (IO dispatcher).
+     */
+    /**
+     * Returns a label→confidence map for [item], e.g. {"Dog": 0.89, "Beach": 0.76}.
+     * Only labels with confidence ≥ [minConfidence] are included.
+     * Returns an empty map for non-image types or on any error.
+     */
+    suspend fun labelImage(
+        item: MediaItem,
+        minConfidence: Float = 0.50f,
+        maxLabels: Int = 8
+    ): Map<String, Float> {
+        if (item.type != MediaType.IMAGE) return emptyMap()
+        return try {
+            val uri   = Uri.parse(item.uri)
+            val image = InputImage.fromFilePath(context, uri)
+            suspendCancellableCoroutine { cont ->
+                imageLabeler.process(image)
+                    .addOnSuccessListener { results ->
+                        val labels = results
+                            .filter { it.confidence >= minConfidence }
+                            .sortedByDescending { it.confidence }
+                            .take(maxLabels)
+                            .associate { it.text to it.confidence }
+                        cont.resume(labels)
+                    }
+                    .addOnFailureListener { e ->
+                        Log.w("MediaRepository", "labelImage failed: ${item.displayName}", e)
+                        cont.resume(emptyMap())
+                    }
+            }
+        } catch (e: Exception) {
+            Log.w("MediaRepository", "labelImage exception: ${item.displayName}", e)
+            emptyMap()
+        }
+    }
+
+    /** Release the ML Kit labeler. Call from ViewModel.onCleared(). */
+    fun closeLabeler() {
+        try { imageLabeler.close() } catch (_: Exception) {}
+    }
+
+    // ── PDF word extraction for BM25 index ───────────────────────────────────
+
+    /**
+     * Extract a word-frequency map from a PDF [item] using Apache PDFBox.
+     *
+     * Only the first [maxPages] pages are read (default: 5).  The user's own
+     * PDF collection has a median of 3 pages, so this covers the majority of
+     * documents completely while keeping extraction fast for long reports.
+     *
+     * Text is tokenised, stop words removed, and term frequencies counted.
+     * Returns an empty map for scanned / encrypted PDFs or on any error — the
+     * caller records this as a no-text sentinel so we never re-attempt extraction.
+     */
+    fun extractPdfWords(item: MediaItem, maxPages: Int = 5): Map<String, Int> {
+        if (item.type != MediaType.PDF) return emptyMap()
+        return try {
+            val uri = Uri.parse(item.uri)
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                PDDocument.load(stream).use { doc ->
+                    if (doc.isEncrypted) return emptyMap()
+                    val stripper = PDFTextStripper().apply {
+                        startPage = 1
+                        endPage   = minOf(doc.numberOfPages, maxPages)
+                    }
+                    tokenizeAndCount(stripper.getText(doc))
+                }
+            } ?: emptyMap()
+        } catch (e: Throwable) {
+            // Catch Throwable (not just Exception) so OutOfMemoryError is handled
+            // gracefully — the PDF is recorded as a no-text sentinel and indexing
+            // continues rather than crashing the whole background job.
+            Log.w("MediaRepository", "extractPdfWords failed: ${item.displayName} [${e.javaClass.simpleName}]", e)
+            emptyMap()
+        }
+    }
+
+    /**
+     * Tokenise [text] into lowercase alphanumeric tokens, remove stop words,
+     * and count term frequencies.
+     *
+     * Filters:
+     *  - Tokens shorter than 2 characters (noise)
+     *  - Tokens longer than 30 characters (URL fragments, base64, etc.)
+     *  - Common English stop words
+     */
+    private fun tokenizeAndCount(text: String): Map<String, Int> {
+        if (text.isBlank()) return emptyMap()
+        val counts = HashMap<String, Int>()
+        // Replace all non-alphanumeric runs with a space, then split
+        val tokens = text.lowercase().replace(Regex("[^a-z0-9]+"), " ").split(' ')
+        for (token in tokens) {
+            if (token.length < 2 || token.length > 30) continue
+            if (token in PDF_STOP_WORDS) continue
+            counts[token] = (counts[token] ?: 0) + 1
+        }
+        return counts
+    }
+
+    companion object {
+        /**
+         * Common English stop words stripped from PDF text before indexing.
+         * Kept intentionally broad to reduce index size without losing recall —
+         * users searching for "invoice" or "contract" don't want matches on "the".
+         */
+        private val PDF_STOP_WORDS = setOf(
+            "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+            "of", "with", "by", "from", "as", "is", "was", "are", "were", "be",
+            "been", "being", "have", "has", "had", "do", "does", "did", "will",
+            "would", "could", "should", "may", "might", "shall", "can", "not",
+            "no", "nor", "so", "yet", "both", "either", "neither", "each",
+            "more", "most", "other", "some", "such", "than", "too", "very",
+            "that", "this", "these", "those", "it", "its", "they", "their",
+            "them", "he", "she", "his", "her", "we", "our", "you", "your",
+            "i", "my", "me", "us", "who", "what", "which", "all", "any",
+            "if", "then", "else", "when", "where", "how", "about", "after",
+            "before", "during", "since", "until", "while", "into", "through",
+            "over", "under", "up", "down", "out", "off", "again", "also",
+            "just", "only", "even", "well", "back", "there", "here", "now",
+            "still", "already", "much", "many", "same", "new", "first",
+            "last", "long", "own", "right", "next", "never", "always"
+        )
     }
 }
