@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Single photo thumbnail within a duplicate group card.
+     Created programmatically and inflated into llThumbs. -->
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="110dp"
+    android:layout_height="110dp"
+    android:layout_marginEnd="8dp">
+
+    <!-- The photo thumbnail -->
+    <ImageView
+        android:id="@+id/ivThumb"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:background="#22000000" />
+
+    <!-- Keep / delete badge — top-right corner -->
+    <TextView
+        android:id="@+id/tvBadge"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="4dp"
+        android:gravity="center"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- File size label — bottom, semi-transparent scrim -->
+    <TextView
+        android:id="@+id/tvSize"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="#88000000"
+        android:paddingHorizontal="4dp"
+        android:paddingVertical="2dp"
+        android:textColor="#FFFFFF"
+        android:textSize="10sp" />
+
+    <!-- Folder label — below size -->
+    <TextView
+        android:id="@+id/tvFolder"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="18dp"
+        android:background="#66000000"
+        android:paddingHorizontal="4dp"
+        android:paddingVertical="2dp"
+        android:textColor="#DDDDDD"
+        android:textSize="9sp"
+        android:maxLines="1"
+        android:ellipsize="start" />
+
+</FrameLayout>

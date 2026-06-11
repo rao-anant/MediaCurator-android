@@ -8,7 +8,7 @@
         app:showAsAction="always|collapseActionView"
         app:actionViewClass="androidx.appcompat.widget.SearchView" />
 
-    <item android:id="@+id/action_backup" android:title="Export / Import"
+    <item android:id="@+id/action_backup" android:title="Export / Import hidden months list"
         app:showAsAction="never" />
     <item android:id="@+id/action_refresh" android:title="Refresh"
         android:icon="@android:drawable/ic_menu_rotate"
@@ -17,15 +17,17 @@
         android:icon="@drawable/ic_info"
         app:showAsAction="always"
         app:iconTint="?attr/colorOnSurface" />
-    <item android:id="@+id/action_one_click_delete"
-        android:title="One-Click Delete"
-        android:checkable="true"
-        app:showAsAction="never" />
     <item android:id="@+id/action_pdf_content_search"
         android:title="PDF content search"
         android:checkable="true"
         app:showAsAction="never" />
+    <item android:id="@+id/action_find_duplicates"
+        android:title="Find duplicates"
+        app:showAsAction="never" />
     <item android:id="@+id/action_help"
         android:title="Help"
+        app:showAsAction="never" />
+    <item android:id="@+id/action_share_diagnostics"
+        android:title="Share diagnostics"
         app:showAsAction="never" />
 </menu>

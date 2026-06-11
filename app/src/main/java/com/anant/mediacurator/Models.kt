@@ -40,6 +40,20 @@ data class MediaItem(
     val isWhatsApp: Boolean get() = relativePath.contains("whatsapp", ignoreCase = true)
 }
 
+/**
+ * A set of photos that are exact duplicates (same MD5 hash).
+ * [keepIndex] is the index of the copy the user wants to KEEP; all others are marked for deletion.
+ * Mutable so the user can tap to change which copy to keep in the review UI.
+ */
+data class DuplicateGroup(
+    val md5: String,
+    val items: List<MediaItem>,
+    var keepIndex: Int = 0
+) {
+    /** Bytes that would be freed by deleting all but the kept copy. */
+    val reclaimableBytes: Long get() = items.sumOf { it.size } - items[keepIndex].size
+}
+
 data class MonthGroup(
     val year: Int,
     val month: Int,

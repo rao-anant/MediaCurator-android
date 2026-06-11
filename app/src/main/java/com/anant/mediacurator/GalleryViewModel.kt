@@ -2,6 +2,7 @@ package com.anant.mediacurator
 
 import android.app.Application
 import android.content.ContentUris
+import android.content.Context
 import android.content.ContentValues
 import android.content.IntentSender
 import android.database.ContentObserver
@@ -16,11 +17,14 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
@@ -139,7 +143,28 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private val _pdfIndexOomEvent = MutableLiveData<Unit>()
     val pdfIndexOomEvent: LiveData<Unit> = _pdfIndexOomEvent
 
-    // ── Search ────────────────────────────────────────────────────────────────
+    // ── Photo duplicate detection ─────────────────────────────────────────────
+    val photoHashStore = PhotoHashStore.getInstance(app)
+    private var photoHashingJob: Job? = null
+    // Non-null when hashing was deferred because MANAGE_EXTERNAL_STORAGE was not yet
+    // granted on a fresh install/reinstall.  Call resumeDeferredHashing() once the
+    // permission flow completes (grant or skip).
+    private var deferredHashMedia: List<MediaItem>? = null
+    // True when resumeDeferredHashing() was called before PDF indexing finished
+    // (deferredHashMedia was null at that point).  The next startPhotoHashingInBackground
+    // call will see this flag and force-start instead of deferring again.
+    private var hashingPermissionReady = false
+
+    // Progress of the background photo hashing run.
+    // Null = idle (nothing to hash or hashing disabled).
+    private val _photoHashProgress = MutableLiveData<PhotoHashProgress?>(null)
+    val photoHashProgress: LiveData<PhotoHashProgress?> = _photoHashProgress
+
+    // Fired (once) when hashing is killed by an OutOfMemoryError.
+    private val _photoHashOomEvent = MutableLiveData<Unit>()
+    val photoHashOomEvent: LiveData<Unit> = _photoHashOomEvent
+
+// ── Search ────────────────────────────────────────────────────────────────
     // Null = not in search mode (gallery shows normally).
     // Non-null = active search; list may be empty if nothing matched.
     private val _searchResults = MutableLiveData<List<GalleryItem>?>(null)
@@ -157,8 +182,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         fun getFingerprint(item: MediaItem): String = "${item.displayName}_${item.size}"
 
         // Fixed filename so we can always overwrite / locate the single live backup.
-        const val AUTO_BACKUP_FILENAME     = "mediacurator_hidden.json"
-        const val PDF_INDEX_BACKUP_FILENAME = "mediacurator_pdf_index.json.gz"
+        const val AUTO_BACKUP_FILENAME        = "mediacurator_hidden.json"
+        const val PDF_INDEX_BACKUP_FILENAME   = "mediacurator_pdf_index.json.gz"
+        // Tab-separated: displayName \t size \t md5hex — one entry per line, gzip compressed.
+        // Keyed by displayName+size so IDs survive reinstall.
+        const val PHOTO_HASH_BACKUP_FILENAME  = "mediacurator_photo_hashes.txt.gz"
     }
 
     private var pendingItemsToDelete: List<MediaItem>? = null
@@ -513,10 +541,12 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             // Kick off background indexing whenever raw media is freshly fetched.
             if (forceRefresh || cachedRawMedia == null) {
                 val images = filteredMedia.filter { it.type == MediaType.IMAGE }
+                val videos = filteredMedia.filter { it.type == MediaType.VIDEO }
                 val pdfs   = filteredMedia.filter { it.type == MediaType.PDF }
                 withContext(Dispatchers.Main) {
                     startLabelingInBackground(images)
-                    startPdfIndexingInBackground(pdfs)
+                    // Photos AND videos are hashed for duplicate detection; PDF indexing runs first.
+                    startPdfIndexingInBackground(pdfs, images + videos)
                 }
             }
 
@@ -581,7 +611,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                         try {
                             resolver.delete(android.net.Uri.parse(item.uri), null, null)
                         } catch (e: Exception) {
-                            Log.e("GalleryViewModel", "PDF direct delete failed: ${item.displayName}", e)
+                            // id + size, not displayName — diagnostics may be shared off-device
+                            DebugLog.e("gallery", "PDF direct delete failed: id=${item.id} ${item.size}B", e)
                         }
                     }
 
@@ -948,10 +979,17 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
      *
      * Progress is null while idle and non-null during an active run.
      */
-    fun startPdfIndexingInBackground(pdfs: List<MediaItem>) {
+    /**
+     * @param mediaToHash Images + videos to hash for duplicate detection — started after PDF
+     *                    indexing completes (or immediately if PDF indexing is disabled / has
+     *                    nothing to do).  Never runs both jobs concurrently.
+     */
+    fun startPdfIndexingInBackground(pdfs: List<MediaItem>, mediaToHash: List<MediaItem> = emptyList()) {
         pdfIndexingJob?.cancel()
         if (pdfs.isEmpty() || !prefs.isPdfContentSearchEnabled()) {
             _pdfIndexProgress.postValue(null)
+            // PDF indexing not needed — go straight to media hashing
+            startPhotoHashingInBackground(mediaToHash)
             return
         }
 
@@ -967,6 +1005,10 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             val unindexed = pdfs.filter { !pdfIndexStore.hasEntry(it.id) }
             if (unindexed.isEmpty()) {
                 _pdfIndexProgress.postValue(null)
+                // Nothing to index — still must chain to media hashing, otherwise hashing
+                // never runs once the PDF index is complete (the common case after the
+                // first full run).
+                withContext(Dispatchers.Main) { startPhotoHashingInBackground(mediaToHash) }
                 return@launch
             }
 
@@ -1000,19 +1042,376 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                     delay(200)   // suspension point — lets GC reclaim PDFBox objects
                 }
             } catch (oom: OutOfMemoryError) {
-                Log.e("GalleryViewModel", "PDF indexing OOM after $indexed/$total — auto-disabling", oom)
+                DebugLog.e("gallery", "PDF indexing OOM after $indexed/$total — auto-disabling", oom)
                 prefs.setPdfContentSearchEnabled(false)
                 bm25IndexCache = null
                 _pdfIndexProgress.postValue(null)
                 _pdfIndexOomEvent.postValue(Unit)
+                // PDF indexing is dead for this session, but photo hashing barely allocates
+                // (stream buffers only) — still run it so duplicates stay functional.
+                withContext(Dispatchers.Main) { startPhotoHashingInBackground(mediaToHash) }
                 return@launch
             }
 
             Log.d("GalleryViewModel", "PDF indexing complete. $indexed / $total processed.")
             _pdfIndexProgress.postValue(PdfIndexProgress(indexed, total, true))
 
-            // Step 5: backup after a successful complete run
-            if (isActive) savePdfIndexBackup(pdfs)
+            // Step 5: backup after a successful complete run, then start media hashing
+            if (isActive) {
+                savePdfIndexBackup(pdfs)
+                withContext(Dispatchers.Main) { startPhotoHashingInBackground(mediaToHash) }
+            }
+        }
+    }
+
+    // ── Photo hashing ─────────────────────────────────────────────────────────
+
+    /**
+     * Hash any photos or videos not yet in [photoHashStore] using MD5.
+     *
+     * Runs AFTER [startPdfIndexingInBackground] completes (never concurrently).
+     * PDF indexing has higher priority — media hashing only starts once PDFs are done.
+     *
+     * OOM defence mirrors PDF indexing: per-photo Throwable catch + outer OOM catch
+     * that auto-disables the feature and notifies the user.
+     * Partial results are flushed to disk so progress is not lost on OOM.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)   // Dispatchers.IO.limitedParallelism
+    fun startPhotoHashingInBackground(photos: List<MediaItem>, forceStart: Boolean = false) {
+        photoHashingJob?.cancel()
+        if (photos.isEmpty() || !prefs.isPhotoDuplicateDetectionEnabled()) {
+            _photoHashProgress.postValue(null)
+            return
+        }
+
+        // On Android 11+, reading the Downloads backup requires MANAGE_EXTERNAL_STORAGE.
+        // If the cache is empty (fresh install / reinstall) and that permission isn't granted
+        // yet, defer hashing until resumeDeferredHashing() is called after the permission
+        // dialog resolves.  This gives the user time to grant the permission so the restore
+        // works and we avoid re-hashing 16k+ files from scratch.
+        //
+        // countEntries() is safe to call without ensureLoaded() — if not yet loaded the
+        // in-memory map is empty, which is exactly the "needs restore" condition we check.
+        // We deliberately avoid ensureLoaded() here because this may be called on the main
+        // thread and reading the (potentially large) cache file there would be a StrictMode
+        // violation.  forceStart bypasses this check when resumeDeferredHashing() retries
+        // regardless of permission status.
+        val shouldForce = forceStart || hashingPermissionReady
+        hashingPermissionReady = false   // consume the flag
+        if (!shouldForce
+            && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+            && !android.os.Environment.isExternalStorageManager()
+            && !photoHashStore.cacheFileExists()   // no local cache = reinstall/fresh install
+        ) {
+            DebugLog.i("gallery", "Hash cache empty, MANAGE_EXTERNAL_STORAGE not yet granted — deferring hashing")
+            deferredHashMedia = photos
+            _photoHashProgress.postValue(null)
+            return
+        }
+
+        photoHashingJob = viewModelScope.launch(Dispatchers.IO) {
+            photoHashStore.ensureLoaded()
+
+            // On a fresh install the cache is empty — try restoring from the Downloads backup
+            // first so we don't re-hash everything from scratch.
+            if (photoHashStore.countEntries() == 0 && photos.isNotEmpty()) {
+                restorePhotoHashFromBackup(photos)
+            }
+
+            val unprocessed = photos.filter { !photoHashStore.hasValidEntry(it.id, it.size) }
+            if (unprocessed.isEmpty()) {
+                _photoHashProgress.postValue(null)
+                return@launch
+            }
+
+            val total = unprocessed.size
+            val hashedCounter = java.util.concurrent.atomic.AtomicInteger(0)
+            Log.d("GalleryViewModel", "Photo hashing: $total photos need hashing")
+            _photoHashProgress.postValue(PhotoHashProgress(0, total, false))
+
+            // Bounded parallelism: MD5 is I/O-bound (flash read dominates).  On UFS storage
+            // (flagships) 4 concurrent streams ≈ 3-4x throughput.  On low-RAM/eMMC devices
+            // (most budget phones) parallel streams thrash the slower flash controller and
+            // compete with 4 slow cores — 2 workers is the sweet spot there.
+            val am = getApplication<Application>()
+                .getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val workers = if (am.isLowRamDevice || Runtime.getRuntime().availableProcessors() <= 4) 2 else 4
+            val hashDispatcher = Dispatchers.IO.limitedParallelism(workers)
+
+            try {
+                // Outer batches of 200: flush + progress checkpoint boundaries.
+                for (batch in unprocessed.chunked(200)) {
+                    if (!isActive) break
+                    coroutineScope {
+                        batch.map { item ->
+                            async(hashDispatcher) {
+                                try {
+                                    val md5 = repo.computeMd5(item)
+                                    if (md5.isNotEmpty()) photoHashStore.saveHash(item.id, item.size, md5)
+                                } catch (e: Throwable) {
+                                    if (e is OutOfMemoryError) throw e   // escalate to outer handler
+                                    Log.w("GalleryViewModel", "computeMd5 threw for ${item.displayName}", e)
+                                }
+                                // Throttle UI updates: post every 25 items instead of every item
+                                // (16k postValues = pointless main-thread churn; LiveData conflates
+                                // anyway, but no reason to generate them).
+                                val done = hashedCounter.incrementAndGet()
+                                if (done % 25 == 0 || done == total) {
+                                    _photoHashProgress.postValue(PhotoHashProgress(done, total, false))
+                                }
+                            }
+                        }.awaitAll()
+                    }
+                    photoHashStore.flush()   // persist each batch — partial progress survives crash
+                }
+            } catch (oom: OutOfMemoryError) {
+                val hashed = hashedCounter.get()
+                DebugLog.e("gallery", "Photo hashing OOM after $hashed/$total — auto-disabling", oom)
+                prefs.setPhotoDuplicateDetectionEnabled(false)
+                photoHashStore.flush()
+                _photoHashProgress.postValue(null)
+                _photoHashOomEvent.postValue(Unit)
+                return@launch
+            }
+            val hashed = hashedCounter.get()
+
+            // Always persist partial progress, even if this job was cancelled mid-run
+            // (loadMedia cancels and restarts us on every resume).
+            photoHashStore.flush()
+
+            // But only a job that ran to completion may write the backup and post "done" —
+            // a cancelled run would overwrite a complete backup with a partial one and
+            // falsely clear the progress UI of the replacement job.
+            if (!isActive) return@launch
+
+            Log.d("GalleryViewModel", "Photo hashing complete. $hashed/$total processed.")
+
+            // Save backup BEFORE posting isDone=true.  If the user uninstalls the moment
+            // they see the progress bar disappear, the backup must already be on disk.
+            savePhotoHashBackup(photos)
+
+            _photoHashProgress.postValue(PhotoHashProgress(hashed, total, true))
+        }
+    }
+
+    /**
+     * Called after the MANAGE_EXTERNAL_STORAGE permission dialog resolves (grant or skip).
+     * If hashing was deferred because the cache was empty and permission wasn't yet granted,
+     * this kicks it off now — with the permission available the restore from Downloads will work.
+     * Safe to call even when nothing was deferred.
+     */
+    fun resumeDeferredHashing() {
+        // Never launch hashing directly here — loadMedia() is always called alongside this
+        // (from allFilesAccessLauncher / Skip button), which will chain to hashing after PDF
+        // indexing completes.  Launching hashing here too causes concurrent PDF + photo
+        // hashing that exhausts the heap (OOM in PDFBox GlyphList static init).
+        // Just arm the flag so the next startPhotoHashingInBackground force-starts.
+        deferredHashMedia = null
+        hashingPermissionReady = true
+        DebugLog.i("gallery", "resumeDeferredHashing: armed force-start, hashing will begin after PDF indexing")
+    }
+
+    // ── Photo hash backup / restore ───────────────────────────────────────────
+
+    /**
+     * Save all photo/video hashes to a gzip-compressed tab-separated file in Downloads.
+     * Format per line: displayName \t size \t md5hex
+     * Keyed by displayName+size so IDs survive reinstall.
+     *
+     * On Android 10+ uses MediaStore.Downloads (no special permission needed).
+     * Falls back to direct file write on older versions.
+     */
+    private fun savePhotoHashBackup(mediaItems: List<MediaItem>) {
+        val app      = getApplication<Application>()
+        val resolver = app.contentResolver
+
+        fun writeTo(out: java.io.OutputStream) {
+            GZIPOutputStream(out).use { gzip ->
+                gzip.bufferedWriter(Charsets.UTF_8).use { writer ->
+                    var written = 0
+                    for (item in mediaItems) {
+                        val md5 = photoHashStore.getHash(item.id) ?: continue
+                        writer.write("${item.displayName}\t${item.size}\t$md5\n")
+                        written++
+                    }
+                    Log.d("GalleryViewModel", "Photo hash backup: wrote $written entries")
+                }
+            }
+        }
+
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val backupFile   = java.io.File(downloadsDir, PHOTO_HASH_BACKUP_FILENAME)
+        val base         = PHOTO_HASH_BACKUP_FILENAME.removeSuffix(".txt.gz")
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val collection = MediaStore.Downloads.getContentUri("external")
+
+                // Write the NEW backup first — if the app dies mid-write, the previous
+                // backup is still intact.  MediaStore auto-numbers the new file
+                // ("name (1).txt.gz") if old copies exist; restore picks the newest by
+                // DATE_MODIFIED / lastModified, so coexistence is harmless.
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, PHOTO_HASH_BACKUP_FILENAME)
+                    put(MediaStore.Downloads.MIME_TYPE, "application/gzip")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val uri = resolver.insert(collection, values)
+                    ?: throw Exception("MediaStore insert returned null")
+                resolver.openOutputStream(uri)?.use { writeTo(it) }
+                    ?: throw Exception("openOutputStream returned null for $uri")
+
+                // New backup is safely on disk — now clean up older copies.
+                // Resolve OUR new file's name (may be auto-numbered) so we don't delete it.
+                val newName = resolver.query(uri, arrayOf(MediaStore.Downloads.DISPLAY_NAME),
+                    null, null, null)?.use { c ->
+                    if (c.moveToFirst()) c.getString(0) else null
+                } ?: PHOTO_HASH_BACKUP_FILENAME
+
+                // NOTE: Android auto-numbering inserts " (1)" BEFORE the last extension:
+                // "name.txt.gz" → "name.txt (1).gz".  So match on prefix + ".gz", never
+                // on the full ".txt.gz" suffix (which numbered variants don't have).
+                try {
+                    resolver.delete(collection,
+                        "${MediaStore.Downloads.DISPLAY_NAME} LIKE ? AND ${MediaStore.Downloads.DISPLAY_NAME} != ?",
+                        arrayOf("$base%.gz", newName))
+                } catch (_: Exception) {}
+
+                // Direct-path cleanup for stale files owned by a previous install that
+                // MediaStore deletion can't touch.
+                if (android.os.Environment.isExternalStorageManager()) {
+                    downloadsDir.listFiles { f ->
+                        f.name.startsWith(base) && f.name.endsWith(".gz") && f.name != newName
+                    }?.forEach { try { it.delete() } catch (_: Exception) {} }
+                }
+
+                // If our new file got auto-numbered (plain name was taken at insert time),
+                // rename it back to the plain name now that the old copies are gone.
+                // Purely cosmetic — restore matches by prefix — but stops the numbering
+                // from creeping up ((1), (2), …) across successive saves.
+                if (newName != PHOTO_HASH_BACKUP_FILENAME) {
+                    try {
+                        resolver.update(uri, ContentValues().apply {
+                            put(MediaStore.Downloads.DISPLAY_NAME, PHOTO_HASH_BACKUP_FILENAME)
+                        }, null, null)
+                    } catch (_: Exception) {}
+                }
+            } else {
+                // Pre-Q: write to a temp file, then atomically swap into place.
+                val tmp = java.io.File(downloadsDir, "$PHOTO_HASH_BACKUP_FILENAME.tmp")
+                tmp.parentFile?.mkdirs()
+                tmp.outputStream().use { writeTo(it) }
+                if (!tmp.renameTo(backupFile)) {
+                    // Rename across same dir should always work; fall back to copy+delete
+                    tmp.copyTo(backupFile, overwrite = true)
+                    tmp.delete()
+                }
+            }
+            DebugLog.i("gallery", "Photo hash backup saved to Downloads")
+        } catch (e: Exception) {
+            DebugLog.e("gallery", "savePhotoHashBackup failed", e)
+        }
+    }
+
+    /**
+     * Restore hashes from the Downloads backup into [photoHashStore].
+     * Maps backup entries (keyed by displayName+size) to the current MediaStore IDs.
+     * Called once at the start of a hashing run when the internal cache is empty.
+     *
+     * Try order on Android 10+:
+     *  1. MediaStore.Downloads query (works for files this package created)
+     *  2. Direct file path fallback (works when MANAGE_EXTERNAL_STORAGE is granted,
+     *     or if the file survives as accessible on the filesystem)
+     */
+    private fun restorePhotoHashFromBackup(mediaItems: List<MediaItem>) {
+        val app      = getApplication<Application>()
+        val resolver = app.contentResolver
+
+        fun readFrom(inp: java.io.InputStream): Int {
+            val fingerprintToItem = mediaItems.associateBy { "${it.displayName}_${it.size}" }
+            var restored = 0
+            GZIPInputStream(inp).bufferedReader(Charsets.UTF_8).use { reader ->
+                reader.forEachLine { line ->
+                    val tab1 = line.indexOf('\t')
+                    if (tab1 < 0) return@forEachLine
+                    val tab2 = line.indexOf('\t', tab1 + 1)
+                    if (tab2 < 0) return@forEachLine
+                    val displayName = line.substring(0, tab1)
+                    val size  = line.substring(tab1 + 1, tab2).toLongOrNull() ?: return@forEachLine
+                    val md5   = line.substring(tab2 + 1).trim()
+                    if (md5.length != 32) return@forEachLine
+                    val item  = fingerprintToItem["${displayName}_${size}"] ?: return@forEachLine
+                    photoHashStore.saveHash(item.id, item.size, md5)
+                    restored++
+                }
+            }
+            return restored
+        }
+
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val base         = PHOTO_HASH_BACKUP_FILENAME.removeSuffix(".txt.gz")
+
+        // Open the most-recent backup file.  Try order:
+        //  1. Direct file path — works when MANAGE_EXTERNAL_STORAGE is granted, finds the
+        //     original regardless of which install created it.  Most reliable on reinstall.
+        //  2. MediaStore LIKE query — catches numbered variants (1), (2) this install created.
+        val inputStream: java.io.InputStream? = run {
+            // Pass 1: direct path via MANAGE_EXTERNAL_STORAGE (Android 11+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && android.os.Environment.isExternalStorageManager()
+            ) {
+                // Pick newest file whose name starts with our base name.
+                // Match ".gz" not ".txt.gz" — auto-numbered copies are "name.txt (1).gz".
+                val newest = downloadsDir.listFiles { f ->
+                    f.name.startsWith(base) && f.name.endsWith(".gz")
+                }?.maxByOrNull { it.lastModified() }
+                if (newest != null) {
+                    DebugLog.i("gallery", "Restore: found ${newest.name} via direct path")
+                    try { return@run newest.inputStream() } catch (_: Exception) {}
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Pass 2: MediaStore LIKE query — finds (1)/(2) variants owned by this install
+                val collection = MediaStore.Downloads.getContentUri("external")
+                try {
+                    resolver.query(
+                        collection,
+                        arrayOf(MediaStore.Downloads._ID),
+                        "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
+                        arrayOf("$base%.gz"),
+                        "${MediaStore.Downloads.DATE_MODIFIED} DESC"
+                    )?.use { cursor ->
+                        if (!cursor.moveToFirst()) return@use null
+                        val id  = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
+                        val uri = ContentUris.withAppendedId(collection, id)
+                        DebugLog.i("gallery", "Restore: found $uri via MediaStore")
+                        resolver.openInputStream(uri)
+                    }
+                } catch (e: Exception) {
+                    Log.w("GalleryViewModel", "MediaStore restore query failed", e); null
+                }
+            } else {
+                // Pre-Q: direct file path, no special permission needed
+                val file = java.io.File(downloadsDir, PHOTO_HASH_BACKUP_FILENAME)
+                if (file.exists()) try { file.inputStream() } catch (_: Exception) { null } else null
+            }
+        }
+
+        if (inputStream == null) {
+            DebugLog.i("gallery", "Photo hash backup: no backup file found — will hash from scratch")
+            // no backup — log already written above
+            return
+        }
+
+        try {
+            val restored = inputStream.use { readFrom(it) }
+            photoHashStore.flush()
+            DebugLog.i("gallery", "Photo hash restore: $restored / ${mediaItems.size} entries restored")
+            // restore complete — count already logged above
+        } catch (e: Exception) {
+            DebugLog.e("gallery", "restorePhotoHashFromBackup read failed", e)
+            // restore failed — error already logged above
         }
     }
 
@@ -1024,7 +1423,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             val entries = pdfIndexStore.loadAll()
             PdfBm25Index(entries).also { bm25IndexCache = it }
         } catch (oom: OutOfMemoryError) {
-            Log.e("GalleryViewModel", "BM25 index build OOM — auto-disabling PDF content search", oom)
+            DebugLog.e("gallery", "BM25 index build OOM — auto-disabling PDF content search", oom)
             prefs.setPdfContentSearchEnabled(false)
             bm25IndexCache = null
             _pdfIndexOomEvent.postValue(Unit)
@@ -1086,7 +1485,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         jw.endObject()  // pdfs
                         jw.endObject()  // root
-                        Log.i("GalleryViewModel", "PDF backup: streamed $written entries")
+                        DebugLog.i("gallery", "PDF backup: streamed $written entries")
                     }
                 }
             }
@@ -1097,10 +1496,12 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                     resolver.delete(collection,
                         "${MediaStore.Downloads.DISPLAY_NAME} = ?",
                         arrayOf(PDF_INDEX_BACKUP_FILENAME))
+                    // Auto-numbered copies are "name.json (1).gz" — the " (1)" goes BEFORE
+                    // the last extension, so match prefix + ".gz", not ".json.gz".
                     val base = PDF_INDEX_BACKUP_FILENAME.removeSuffix(".json.gz")
                     resolver.delete(collection,
                         "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
-                        arrayOf("$base (%).json.gz"))
+                        arrayOf("$base%.gz"))
                 } catch (_: Exception) {}
 
                 val values = ContentValues().apply {
@@ -1120,7 +1521,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 file.outputStream().use { writeTo(it) }
             }
         } catch (e: Exception) {
-            Log.e("GalleryViewModel", "PDF index backup failed", e)
+            DebugLog.e("gallery", "PDF index backup failed", e)
         }
     }
 
@@ -1201,7 +1602,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                     )
                     if (!file.exists()) return
                     restored = restoreFrom(file.inputStream())
-                    Log.i("GalleryViewModel", "PDF index restored (file path): $restored / ${currentPdfs.size}")
+                    DebugLog.i("gallery", "PDF index restored (file path): $restored / ${currentPdfs.size}")
                     return
                 }
                 resolver.openInputStream(uri)?.use { restored = restoreFrom(it) } ?: return
@@ -1215,9 +1616,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 restored = restoreFrom(file.inputStream())
             }
 
-            Log.i("GalleryViewModel", "PDF index restored: $restored / ${currentPdfs.size} matched")
+            DebugLog.i("gallery", "PDF index restored: $restored / ${currentPdfs.size} matched")
         } catch (e: Exception) {
-            Log.e("GalleryViewModel", "PDF index restore failed", e)
+            DebugLog.e("gallery", "PDF index restore failed", e)
         }
     }
 
@@ -1315,7 +1716,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                     file.writeText(buildBackupJson(months), Charsets.UTF_8)
                 }
             } catch (e: Exception) {
-                Log.e("GalleryViewModel", "Auto-backup failed", e)
+                DebugLog.e("gallery", "Auto-backup failed", e)
             }
         }
     }
@@ -1390,13 +1791,13 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                     val arr    = obj.getJSONArray("hiddenMonths")
                     val months = (0 until arr.length()).map { arr.getString(it) }.toSet()
                     if (months.isNotEmpty()) {
-                        Log.i("GalleryViewModel", "Auto-restore: found ${months.size} hidden months, prompting user")
+                        DebugLog.i("gallery", "Auto-restore: found ${months.size} hidden months, prompting user")
                         // Hand off to the Activity — don't import silently.
                         _autoRestorePrompt.postValue(months)
                     }
                 }
             } catch (e: Exception) {
-                Log.e("GalleryViewModel", "Auto-restore check failed", e)
+                DebugLog.e("gallery", "Auto-restore check failed", e)
             }
         }
     }

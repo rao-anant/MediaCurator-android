@@ -103,7 +103,15 @@ class GalleryAdapter(
     private val selectedIds = mutableSetOf<Long>()
     private val adapterScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var diffJob: Job? = null
-    private val pdfThumbnailCache = mutableMapOf<Long, Bitmap?>()
+    // LruCache sized in KB, capped at 1/16 of the max heap.  Unbounded caching of
+    // ~800 KB ARGB_8888 thumbs would OOM low-RAM devices after a few hundred PDFs.
+    // Negative results (render failures) are tracked separately so we don't retry them.
+    private val pdfThumbnailCache = object : android.util.LruCache<Long, Bitmap>(
+        (Runtime.getRuntime().maxMemory() / 1024 / 16).toInt().coerceIn(4_096, 65_536)
+    ) {
+        override fun sizeOf(key: Long, value: Bitmap) = value.byteCount / 1024
+    }
+    private val pdfThumbnailFailed = mutableSetOf<Long>()
 
     fun submitList(newList: List<GalleryItem>) {
         val oldList = currentList
@@ -340,13 +348,13 @@ class GalleryAdapter(
                 typeIcon.visibility = View.GONE
                 imageView.tag = item.id
 
-                val cached = pdfThumbnailCache[item.id]
+                val cached = pdfThumbnailCache.get(item.id)
                 when {
                     cached != null -> {
                         imageView.setImageBitmap(cached)
                         imageView.scaleType = ImageView.ScaleType.CENTER_CROP
                     }
-                    !pdfThumbnailCache.containsKey(item.id) -> {
+                    item.id !in pdfThumbnailFailed -> {
                         val appContext = itemView.context.applicationContext
                         pdfJob = adapterScope.launch {
                             val bitmap = withContext(Dispatchers.IO) {
@@ -370,7 +378,8 @@ class GalleryAdapter(
                                     null
                                 }
                             }
-                            pdfThumbnailCache[item.id] = bitmap
+                            if (bitmap != null) pdfThumbnailCache.put(item.id, bitmap)
+                            else pdfThumbnailFailed.add(item.id)
                             if (imageView.tag == item.id && bitmap != null) {
                                 imageView.setImageBitmap(bitmap)
                                 imageView.scaleType = ImageView.ScaleType.CENTER_CROP

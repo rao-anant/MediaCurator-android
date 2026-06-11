@@ -47,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     
     private var offeredOneClickDelete = false
     private var offeredAllFilesAccess = false  // show the PDF-access prompt only once per session
+    private var launchedAllFilesSettings = false  // Grant tapped → Settings open → resume handled by launcher
 
     // Jump toggle: remembers the two positions so the swap FAB can bounce back and forth
     private var jumpAMonthKey: String? = null  // where we came FROM
@@ -66,6 +67,7 @@ class MainActivity : AppCompatActivity() {
                 showToast("Storage permission is required to view your media")
             }
         }
+
 
     private val deleteLauncher =
         registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
@@ -89,12 +91,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-    private val manageMediaLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            invalidateOptionsMenu()
-            showToast(if (hasManageMediaPermission()) "One-Click Delete enabled" else "One-Click Delete disabled")
-        }
-
     private val allFilesAccessLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             // User returned from the "All files access" settings screen.
@@ -106,6 +102,8 @@ class MainActivity : AppCompatActivity() {
             } else {
                 viewModel.loadMedia()
             }
+            // If photo hashing was deferred waiting for this permission, start it now.
+            viewModel.resumeDeferredHashing()
         }
 
     private val importLauncher =
@@ -596,6 +594,29 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        viewModel.photoHashOomEvent.observe(this) {
+            invalidateOptionsMenu()
+            com.google.android.material.snackbar.Snackbar
+                .make(
+                    binding.root,
+                    "Duplicate detection disabled — not enough memory.",
+                    com.google.android.material.snackbar.Snackbar.LENGTH_LONG
+                )
+                .show()
+        }
+
+        viewModel.photoHashProgress.observe(this) { progress ->
+            if (viewModel.searchResults.value != null) return@observe
+            // Only show photo hash progress when PDF indexing is not already showing
+            val pdfActive = viewModel.pdfIndexProgress.value?.isActive == true
+            if (pdfActive) return@observe
+            when {
+                progress == null || progress.isDone -> updateSortSubtitle()
+                progress.isActive ->
+                    supportActionBar?.subtitle = "Hashing photos… ${progress.hashed} / ${progress.total}"
+            }
+        }
+
         viewModel.scrollToTopEvent.observe(this) {
             binding.recyclerView.scrollToPosition(0)
             binding.appBarLayout.setExpanded(true, false)
@@ -655,9 +676,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateSortSubtitle() {
-        // Don't overwrite while PDF indexing progress is being shown
+        // Don't overwrite while PDF indexing or photo hashing progress is being shown
         val progress = viewModel.pdfIndexProgress.value
         if (progress != null && progress.isActive) return
+        val hashProgress = viewModel.photoHashProgress.value
+        if (hashProgress != null && hashProgress.isActive) return
         supportActionBar?.subtitle = when (viewModel.sortMode.value ?: SortMode.DATE_OLDEST) {
             SortMode.DATE_NEWEST       -> "Newest first ▾"
             SortMode.DATE_OLDEST       -> "Oldest first ▾"
@@ -671,13 +694,6 @@ class MainActivity : AppCompatActivity() {
         val inSelection = adapter.selectionMode
         menu.findItem(R.id.action_refresh)?.isVisible = !inSelection
         
-        val oneClickItem = menu.findItem(R.id.action_one_click_delete)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            oneClickItem.isVisible = !inSelection
-            oneClickItem.isChecked = hasManageMediaPermission()
-        } else {
-            oneClickItem.isVisible = false
-        }
         menu.findItem(R.id.action_pdf_content_search)?.let {
             it.isVisible = !inSelection
             it.isChecked = viewModel.isPdfContentSearchEnabled()
@@ -692,7 +708,6 @@ class MainActivity : AppCompatActivity() {
         R.id.sort_size_month    -> { viewModel.setSortMode(SortMode.SIZE_WITHIN_MONTH); true }
         R.id.sort_count_month   -> { viewModel.setSortMode(SortMode.COUNT_PER_MONTH);   true }
         R.id.action_refresh -> { viewModel.loadMedia(forceRefresh = true); true }
-        R.id.action_one_click_delete -> { requestManageMediaPermission(); true }
         R.id.action_backup -> {
             androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("Hidden months backup")
@@ -729,9 +744,45 @@ class MainActivity : AppCompatActivity() {
             }
             true
         }
+        R.id.action_find_duplicates -> {
+            startActivity(android.content.Intent(this, DuplicatesActivity::class.java))
+            true
+        }
         R.id.action_help -> { showHelpDialog(); true }
         R.id.action_stats_info -> { showStatsDialog(); true }
+        R.id.action_share_diagnostics -> { shareDiagnostics(); true }
         else -> super.onOptionsItemSelected(item)
+    }
+
+    /** Assemble device info + app state + the ring log, hand to a share sheet. */
+    private fun shareDiagnostics() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Share diagnostics?")
+            .setMessage(
+                "The report contains your device model, app settings, and a log of recent " +
+                "app activity (indexing results, errors). No photos or file contents are " +
+                "included. You can review the full text before sending."
+            )
+            .setPositiveButton("Continue") { _, _ -> doShareDiagnostics() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun doShareDiagnostics() {
+        val state = mutableListOf<String>()
+        state += "All-files access : ${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) android.os.Environment.isExternalStorageManager() else "n/a"}"
+        state += "Hashes cached    : ${viewModel.photoHashStore.countEntries()}"
+        state += "PDF search       : ${viewModel.prefs.isPdfContentSearchEnabled()}"
+        state += "Dup detection    : ${viewModel.prefs.isPhotoDuplicateDetectionEnabled()}"
+        state += "Gallery items    : ${viewModel.galleryItems.value?.size ?: 0}"
+
+        val report = DebugLog.buildDiagnosticsReport(this, state)
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "Media Curator diagnostics")
+            putExtra(android.content.Intent.EXTRA_TEXT, report)
+        }
+        startActivity(android.content.Intent.createChooser(intent, "Share diagnostics via"))
     }
 
     private fun showSortPopup() {
@@ -758,29 +809,6 @@ class MainActivity : AppCompatActivity() {
         popup.show()
     }
 
-    private fun hasManageMediaPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            MediaStore.canManageMedia(this)
-        } else false
-    }
-
-    private fun requestManageMediaPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (hasManageMediaPermission()) {
-                // Can't revoke programmatically — send user to App Settings to do it there
-                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                    data = Uri.parse("package:$packageName")
-                }
-                startActivity(intent)
-            } else {
-                val intent = Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA).apply {
-                    data = Uri.parse("package:$packageName")
-                }
-                manageMediaLauncher.launch(intent)
-            }
-        }
-    }
-
     private fun hasBasicPermissions(): Boolean {
         val permissions = getRequiredPermissions()
         // On Android 13+, we don't strictly require READ_EXTERNAL_STORAGE as it returns false
@@ -798,9 +826,7 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
             permissions.add(Manifest.permission.READ_MEDIA_VIDEO)
-            permissions.add(Manifest.permission.READ_MEDIA_AUDIO)   // required for audio on API 33+
-            // Still requested for PDF access on some devices, though often denied for media apps
-            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            permissions.add(Manifest.permission.READ_MEDIA_AUDIO)
         } else {
             permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
@@ -839,12 +865,21 @@ class MainActivity : AppCompatActivity() {
                     "Photos and videos work without it. Tap Grant to enable PDFs."
                 )
                 .setPositiveButton("Grant") { _, _ ->
+                    launchedAllFilesSettings = true
                     val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                         data = Uri.parse("package:$packageName")
                     }
                     allFilesAccessLauncher.launch(intent)
                 }
                 .setNegativeButton("Skip", null)
+                // Fires for Skip, back-press, AND tap-outside.  Grant also dismisses, but in
+                // that case the Settings screen is handling it — allFilesAccessLauncher resumes
+                // hashing when the user returns.  Without this listener, dismissing the dialog
+                // via back-press or outside-tap would leave deferred hashing stuck forever.
+                .setOnDismissListener {
+                    if (!launchedAllFilesSettings) viewModel.resumeDeferredHashing()
+                    launchedAllFilesSettings = false
+                }
                 .show()
         }
     }
@@ -1234,7 +1269,7 @@ class MainActivity : AppCompatActivity() {
         val text = """
 Most gallery apps let you delete — but none of them remember what you’ve already reviewed. Come back a week later and you’re staring at the same pile from the beginning (or end, depending on your sorting order).
 
-Media Curator fixes this. Work through a month, mark it as done, and it steps out of your way. Next session you pick up exactly where you left off — every time. Result? A super-charged gallery curation experience.
+Media Curator fixes this. Work through a month, mark it as hidden, and it steps out of your way. Next session you pick up exactly where you left off — every time. Result? A super-charged media curation experience.
 
 Months you hide are never deleted — they stay fully accessible in your phone’s regular gallery, and you can unhide them here anytime.
 
@@ -1261,8 +1296,8 @@ Long-press any item to enter multi-select mode. Tap more items to add them to th
 📦 MOVING FILES
 In multi-select mode, tap Move to relocate the selected files to a folder of your choice.
 
-⚡ ONE-CLICK DELETE (menu)
-When enabled, a single tap on any item deletes it immediately — no confirmation. Use with care.
+♊ FIND DUPLICATES (menu)
+Finds exact duplicate photos and videos (identical file content, even with different names). The app fingerprints your media in the background after PDF indexing completes — progress shows in the toolbar subtitle. Open Find Duplicates to review groups side by side: the best copy in each group (preferring your camera folder, then the oldest) is pre-selected to keep — tap a different copy to keep that one instead. Tap "Delete marked" to remove all the others and reclaim the space.
 
 🔢 SORT ORDER
 Tap the subtitle under "Media Curator" in the toolbar (e.g. "Oldest first ▾") to change the sort order:
@@ -1274,16 +1309,19 @@ Tap the subtitle under "Media Curator" in the toolbar (e.g. "Oldest first ▾") 
 🔍 SEARCH (toolbar search icon)
 Tap the search icon to search by filename or photo labels (things ML Kit sees in your photos — dog, beach, car…). Fuzzy matching handles typos: "flwoer" finds "flower.png".
 
-PDF content is also indexed and searched. The first 5 pages of each PDF are indexed in the background — a counter in the toolbar subtitle shows progress. Results from PDF content show a "📄 content (first 5 pg)" badge. For long PDFs (> 5 pages) the content beyond page 5 is not indexed.
+PDF content is also indexed and searched. The first 5 pages of each PDF are indexed in the background — a counter in the toolbar subtitle shows progress. Results from PDF content show a "📄 content (first 5 pg)" badge. For long PDFs (> 5 pages) the content beyond page 5 is not indexed and hence not searchable.
 
 Multi-word queries use AND logic: "dog beach" only returns items tagged with BOTH concepts.
 
-💾 BACKUP (menu → Export / Import)
-Hidden-month state is auto-saved to mediacurator_hidden.json in your Downloads folder after every hide/unhide. It survives app-data clears and reinstalls — just reinstall and the state restores automatically. Use Export / Import to move your state to another device.
+💾 BACKUP (menu → Export / Import hidden months list)
+Hidden-month state is auto-saved to mediacurator_hidden.json in your Downloads folder after every hide/unhide. It survives app-data clears and reinstalls — just reinstall and the state restores automatically. Use Export / Import hidden months list to move your state to another device.
 
-The PDF content index is also backed up automatically to mediacurator_pdf_index.json.gz in Downloads after indexing completes. On a fresh install, the index is restored from this file — so you don't have to re-index all your PDFs.
+The PDF content index is also backed up automatically to mediacurator_pdf_index.json.gz in Downloads after indexing completes. Likewise, duplicate-detection fingerprints are backed up to mediacurator_photo_hashes.txt.gz. On a fresh install both are restored automatically — so you don't have to re-index your PDFs or re-scan your media.
 
-ℹ️ Note: mediacurator_hidden.json and mediacurator_pdf_index.json.gz are NOT deleted when you uninstall the app. Delete them manually from your Downloads folder if you want a completely clean slate.
+ℹ️ Note: these backup files (mediacurator_hidden.json, mediacurator_pdf_index.json.gz, mediacurator_photo_hashes.txt.gz) are NOT deleted when you uninstall the app. Delete them manually from your Downloads folder if you want a completely clean slate.
+
+🪲 SHARE DIAGNOSTICS (menu)
+Hit a problem? Menu → Share diagnostics builds a report of device info, app settings, and recent activity (no photos, file names, or file contents) that you can review and send to the developer.
         """.trimIndent()
 
         val tv = android.widget.TextView(this).apply {

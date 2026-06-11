@@ -576,6 +576,157 @@ class MediaRepository(private val context: Context) {
         return null
     }
 
+    // ── Photo duplicate detection ─────────────────────────────────────────────
+
+    /**
+     * Compute the MD5 hash of a photo's raw file bytes by streaming through ContentResolver.
+     * Peak memory = one 128 KB I/O buffer per concurrent worker — no image decode, no Bitmap.
+     * 128 KB (vs 8 KB) cuts syscall count ~16x and lets flash storage stream at full bandwidth.
+     * Returns an empty string on any error (the photo will simply not be indexed).
+     */
+    fun computeMd5(item: MediaItem): String {
+        return try {
+            val uri = android.net.Uri.parse(item.uri)
+            val digest = java.security.MessageDigest.getInstance("MD5")
+            val buffer = ByteArray(131_072)
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                var read = stream.read(buffer)
+                while (read > 0) {
+                    digest.update(buffer, 0, read)
+                    read = stream.read(buffer)
+                }
+            }
+            digest.digest().joinToString("") { "%02x".format(it) }
+        } catch (e: Throwable) {
+            Log.e("MediaRepository", "computeMd5 failed for ${item.displayName}", e)
+            ""
+        }
+    }
+
+    /**
+     * Fetch full [MediaItem] details for a set of image IDs from MediaStore.
+     * Used by [DuplicatesViewModel] to hydrate duplicate groups with display data.
+     * IDs that no longer exist in MediaStore (deleted files) are simply absent from the result.
+     */
+    fun fetchImagesByIds(ids: List<Long>): List<MediaItem> {
+        if (ids.isEmpty()) return emptyList()
+        val result = mutableListOf<MediaItem>()
+        val collectionUri = MediaStore.Images.Media.getContentUri("external")
+
+        val projection = mutableListOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+            "datetaken"
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            projection.add(MediaStore.MediaColumns.RELATIVE_PATH)
+        }
+
+        // SQLite IN clause limit is ~999 args — chunk to be safe
+        for (chunk in ids.chunked(500)) {
+            val placeholders = chunk.joinToString(",") { "?" }
+            val selectionArgs = chunk.map { it.toString() }.toTypedArray()
+            try {
+                context.contentResolver.query(
+                    collectionUri,
+                    projection.toTypedArray(),
+                    "${MediaStore.MediaColumns._ID} IN ($placeholders)",
+                    selectionArgs,
+                    null
+                )?.use { cursor ->
+                    val idCol      = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    val nameCol    = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val sizeCol    = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                    val daCol      = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+                    val dmCol      = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
+                    val dtCol      = cursor.getColumnIndex("datetaken")
+                    val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                        cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH) else -1
+
+                    while (cursor.moveToNext()) {
+                        val id      = cursor.getLong(idCol)
+                        val name    = cursor.getString(nameCol) ?: ""
+                        val size    = cursor.getLong(sizeCol)
+                        val dt      = if (dtCol      != -1) cursor.getLong(dtCol)    else 0L
+                        val da      = cursor.getLong(daCol) * 1000
+                        val dm      = cursor.getLong(dmCol) * 1000
+                        val relPath = if (relPathCol != -1) cursor.getString(relPathCol) ?: "" else ""
+                        val uri     = ContentUris.withAppendedId(collectionUri, id).toString()
+                        result.add(MediaItem(id, uri, "external", resolveBestDate(name, dt, dm, da), name, size, MediaType.IMAGE, 0L, relPath))
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MediaRepository", "fetchImagesByIds failed for chunk", e)
+            }
+        }
+        return result
+    }
+
+    /**
+     * Fetch full [MediaItem] details for a set of video IDs from MediaStore.
+     * Mirror of [fetchImagesByIds] for the Video collection.
+     */
+    fun fetchVideosByIds(ids: List<Long>): List<MediaItem> {
+        if (ids.isEmpty()) return emptyList()
+        val result = mutableListOf<MediaItem>()
+        val collectionUri = MediaStore.Video.Media.getContentUri("external")
+
+        val projection = mutableListOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+            "datetaken"
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            projection.add(MediaStore.MediaColumns.DURATION)
+            projection.add(MediaStore.MediaColumns.RELATIVE_PATH)
+        }
+
+        for (chunk in ids.chunked(500)) {
+            val placeholders = chunk.joinToString(",") { "?" }
+            val selectionArgs = chunk.map { it.toString() }.toTypedArray()
+            try {
+                context.contentResolver.query(
+                    collectionUri,
+                    projection.toTypedArray(),
+                    "${MediaStore.MediaColumns._ID} IN ($placeholders)",
+                    selectionArgs,
+                    null
+                )?.use { cursor ->
+                    val idCol      = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    val nameCol    = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val sizeCol    = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                    val daCol      = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+                    val dmCol      = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
+                    val dtCol      = cursor.getColumnIndex("datetaken")
+                    val durCol     = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) cursor.getColumnIndex(MediaStore.MediaColumns.DURATION) else -1
+                    val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH) else -1
+
+                    while (cursor.moveToNext()) {
+                        val id      = cursor.getLong(idCol)
+                        val name    = cursor.getString(nameCol) ?: ""
+                        val size    = cursor.getLong(sizeCol)
+                        val dt      = if (dtCol      != -1) cursor.getLong(dtCol)    else 0L
+                        val da      = cursor.getLong(daCol) * 1000
+                        val dm      = cursor.getLong(dmCol) * 1000
+                        val dur     = if (durCol     != -1) cursor.getLong(durCol)   else 0L
+                        val relPath = if (relPathCol != -1) cursor.getString(relPathCol) ?: "" else ""
+                        val uri     = ContentUris.withAppendedId(collectionUri, id).toString()
+                        result.add(MediaItem(id, uri, "external", resolveBestDate(name, dt, dm, da), name, size, MediaType.VIDEO, dur, relPath))
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MediaRepository", "fetchVideosByIds failed for chunk", e)
+            }
+        }
+        return result
+    }
+
     // ── Image labeling ────────────────────────────────────────────────────────
 
     /**
