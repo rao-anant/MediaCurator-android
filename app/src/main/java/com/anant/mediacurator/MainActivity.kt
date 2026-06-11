@@ -307,6 +307,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupSelectionBar() {
+        binding.btnShareSelected.setOnClickListener {
+            val selected = adapter.getSelectedItems()
+            if (selected.isEmpty()) { showToast("No items selected"); return@setOnClickListener }
+            shareItems(selected)
+        }
         binding.btnMoveSelected.setOnClickListener {
             val selected = adapter.getSelectedItems()
             if (selected.isEmpty()) { showToast("No items selected"); return@setOnClickListener }
@@ -321,13 +326,49 @@ class MainActivity : AppCompatActivity() {
             exitSelectionMode()
             viewModel.deleteMedia(selected)
         }
-        binding.btnCancelSelection.setOnClickListener { exitSelectionMode() }
     }
 
     private fun exitSelectionMode() {
         adapter.exitSelectionMode()
         binding.selectionBar.isVisible = false
         invalidateOptionsMenu()
+    }
+
+    /**
+     * Share the selected media via the system share sheet.  MediaStore content:// URIs
+     * are already shareable across apps with FLAG_GRANT_READ_URI_PERMISSION — no FileProvider
+     * needed.  Uses ACTION_SEND for one item, ACTION_SEND_MULTIPLE for several.
+     */
+    private fun shareItems(items: List<MediaItem>) {
+        val uris = ArrayList(items.map { Uri.parse(it.uri) })
+        // If the selection is all one type, use its concrete MIME so receivers filter well;
+        // mixed selections fall back to */*.
+        val types = items.map { it.type }.toSet()
+        val mime = when {
+            types == setOf(MediaType.IMAGE) -> "image/*"
+            types == setOf(MediaType.VIDEO) -> "video/*"
+            types == setOf(MediaType.AUDIO) -> "audio/*"
+            types == setOf(MediaType.PDF)   -> "application/pdf"
+            else                            -> "*/*"
+        }
+        val intent = if (uris.size == 1) {
+            Intent(Intent.ACTION_SEND).apply {
+                type = mime
+                putExtra(Intent.EXTRA_STREAM, uris[0])
+            }
+        } else {
+            Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = mime
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            }
+        }
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(Intent.createChooser(intent, "Share ${uris.size} item${if (uris.size > 1) "s" else ""}"))
+        } catch (e: Exception) {
+            showToast("No app available to share these files")
+        }
+        // Leave selection mode active so the user can keep curating after sharing.
     }
 
     private fun updateSelectionBar(count: Int) {
@@ -1291,10 +1332,13 @@ Scroll to the bottom of any open month and tap "Hide this month". The month disa
 When you have hidden months, a bar appears at the top. Pick a year from the first dropdown — the month list populates automatically. Select a month to restore it instantly. The app scrolls straight to it.
 
 🗑️ DELETING FILES
-Long-press any item to enter multi-select mode. Tap more items to add them to the selection. Tap Delete in the bar at the bottom.
+Long-press any item to enter multi-select mode. Tap more items to add them to the selection. Tap Delete in the bar at the bottom. Press Back to leave multi-select without deleting.
 
 📦 MOVING FILES
 In multi-select mode, tap Move to relocate the selected files to a folder of your choice.
+
+📤 SHARING FILES
+In multi-select mode, tap Share to send the selected photos, videos, audio, or PDFs through any app — messaging, email, cloud, and more.
 
 ♊ FIND DUPLICATES (menu)
 Finds exact duplicate photos and videos (identical file content, even with different names). The app fingerprints your media in the background after PDF indexing completes — progress shows in the toolbar subtitle. Open Find Duplicates to review groups side by side: the best copy in each group (preferring your camera folder, then the oldest) is pre-selected to keep — tap a different copy to keep that one instead. Tap "Delete marked" to remove all the others and reclaim the space.

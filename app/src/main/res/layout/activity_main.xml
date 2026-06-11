@@ -377,6 +377,13 @@
             android:textColor="@color/on_surface"
             android:text="0 selected" />
         <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnShareSelected"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Share"
+            android:layout_marginEnd="8dp" />
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnMoveSelected"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="wrap_content"
@@ -390,15 +397,7 @@
             android:layout_height="wrap_content"
             android:text="Delete"
             android:textColor="@android:color/white"
-            app:backgroundTint="@color/delete_red"
-            android:layout_marginEnd="8dp" />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnCancelSelection"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Cancel"
-            android:textColor="@color/on_surface" />
+            app:backgroundTint="@color/delete_red" />
     </LinearLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

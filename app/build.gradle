@@ -18,7 +18,7 @@ android {
         applicationId "com.anant.mediacurator"
         minSdk 26
         targetSdk 35
-        versionCode 11
+        versionCode 12
         versionName "1.0"
     }
 
@@ -37,6 +37,12 @@ android {
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig signingConfigs.release
+            // Bundle native debug symbols (from PdfBox-Android / Glide .so libs) so the
+            // Play Console can symbolicate native crashes/ANRs. FULL = function names +
+            // file/line; use SYMBOL_TABLE for smaller size if upload size matters.
+            ndk {
+                debugSymbolLevel 'FULL'
+            }
         }
         debug {
             applicationIdSuffix ".debug"
