@@ -16,10 +16,19 @@
 -keep class * implements com.google.gson.JsonDeserializer
 
 # ── App data classes serialised by Gson / passed via Intent ──────────────────
--keep class com.mediacurator.MediaItem     { *; }
--keep class com.mediacurator.MonthGroup    { *; }
--keep class com.mediacurator.MediaType     { *; }
--keep class com.mediacurator.SortMode      { *; }
+# NOTE: package is com.anant.mediacurator — keeping these preserves field names so
+# Gson backup JSON stays compatible across releases (renamed fields = broken restore).
+-keep class com.anant.mediacurator.MediaItem    { *; }
+-keep class com.anant.mediacurator.MediaStats   { *; }
+-keep class com.anant.mediacurator.MonthGroup   { *; }
+-keep class com.anant.mediacurator.MediaType    { *; }
+-keep class com.anant.mediacurator.SortMode     { *; }
+
+# ── PdfBox-Android (tom_roush) ───────────────────────────────────────────────
+# Optional JPEG2000 decoder that PdfBox references but does not bundle — suppress.
+-dontwarn com.gemalto.jp2.JP2Decoder
+-keep class com.tom_roush.pdfbox.** { *; }
+-dontwarn com.tom_roush.pdfbox.**
 
 # ── PhotoView (chrisbanes) ────────────────────────────────────────────────────
 -keep class com.github.chrisbanes.photoview.** { *; }
