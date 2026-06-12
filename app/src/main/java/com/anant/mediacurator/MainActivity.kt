@@ -48,6 +48,8 @@ class MainActivity : AppCompatActivity() {
     private var offeredOneClickDelete = false
     private var offeredAllFilesAccess = false  // show the PDF-access prompt only once per session
     private var launchedAllFilesSettings = false  // Grant tapped → Settings open → resume handled by launcher
+    private var allFilesPromptActive = false   // true while the PDF-access prompt/Settings is mid-flow
+    private var awaitingAutoRestore = false     // true from auto-restore check start until it settles
 
     // Jump toggle: remembers the two positions so the swap FAB can bounce back and forth
     private var jumpAMonthKey: String? = null  // where we came FROM
@@ -98,12 +100,17 @@ class MainActivity : AppCompatActivity() {
             // (the first attempt at init runs before this permission is granted).
             // Otherwise just reload so PDFs appear.
             if (hasAllFilesPermission() && viewModel.prefs.getDoneMonths().isEmpty()) {
+                // Block onboarding for the whole async check — a "Backup found" prompt may follow.
+                awaitingAutoRestore = true
                 viewModel.checkAndAutoRestore()
             } else {
                 viewModel.loadMedia()
             }
             // If photo hashing was deferred waiting for this permission, start it now.
             viewModel.resumeDeferredHashing()
+            // PDF-access decision is now resolved — onboarding may proceed.
+            allFilesPromptActive = false
+            tryShowOnboarding()
         }
 
     private val importLauncher =
@@ -335,6 +342,34 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * First-run intro to the core curation concept. Shown once, only after the app is
+     * fully ready — media loaded AND the "All files access" decision resolved — so it never
+     * stacks on the permission prompts during install.  Idempotent: safe to call from any
+     * settle point (load finished, prompt dismissed, returned from Settings).
+     */
+    private fun tryShowOnboarding() {
+        if (viewModel.prefs.hasSeenOnboarding()) return
+        if (allFilesPromptActive) return                          // PDF-access decision still pending
+        if (awaitingAutoRestore) return                           // auto-restore check / prompt pending
+        if (!hasBasicPermissions()) return                        // media permission not granted yet
+        if (viewModel.isLoading.value != false) return            // still loading
+        if (viewModel.galleryItems.value.isNullOrEmpty()) return  // nothing on screen yet
+        viewModel.prefs.setSeenOnboarding()
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Curate, don't just scroll")
+            .setMessage(
+                "Media Curator remembers your progress so you never review the same photos twice.\n\n" +
+                "1.  Work through a month's photos, videos and PDFs.\n\n" +
+                "2.  Tap \"Hide this month\" when you're done — it steps out of your way " +
+                "(your files are never deleted, and stay in your normal gallery).\n\n" +
+                "3.  Next time, hidden months stay hidden — so you simply continue " +
+                "with what's left."
+            )
+            .setPositiveButton("Got it", null)
+            .show()
+    }
+
+    /**
      * Share the selected media via the system share sheet.  MediaStore content:// URIs
      * are already shareable across apps with FLAG_GRANT_READ_URI_PERMISSION — no FileProvider
      * needed.  Uses ACTION_SEND for one item, ACTION_SEND_MULTIPLE for several.
@@ -478,6 +513,7 @@ class MainActivity : AppCompatActivity() {
             binding.tvEmpty.isVisible = items.isEmpty() && !isLoading
             if (items.isEmpty() && !isLoading) binding.tvEmpty.text = resolveEmptyMessage()
             binding.recyclerView.post { updateStickyHeader() }
+            tryShowOnboarding()
         }
 
         viewModel.searchResults.observe(this) { results ->
@@ -505,6 +541,7 @@ class MainActivity : AppCompatActivity() {
         viewModel.isLoading.observe(this) { loading ->
             binding.progressBar.isVisible = loading
             if (loading) binding.tvEmpty.isVisible = false  // never show empty state while loading
+            if (!loading) tryShowOnboarding()               // app is ready — maybe show first-run intro
         }
         
         viewModel.sortMode.observe(this) { _ ->
@@ -602,10 +639,23 @@ class MainActivity : AppCompatActivity() {
                     "Found ‘${ GalleryViewModel.AUTO_BACKUP_FILENAME}’ in Downloads " +
                     "with $count hidden month${if (count == 1) "" else "s"}.\n\nImport it?"
                 )
-                .setPositiveButton("Import") { _, _ -> viewModel.confirmAutoRestore(months) }
-                .setNegativeButton("Skip")   { _, _ -> viewModel.dismissAutoRestore() }
+                .setPositiveButton("Import") { _, _ ->
+                    viewModel.confirmAutoRestore(months); awaitingAutoRestore = false; tryShowOnboarding()
+                }
+                .setNegativeButton("Skip")   { _, _ ->
+                    viewModel.dismissAutoRestore(); awaitingAutoRestore = false; tryShowOnboarding()
+                }
                 .setCancelable(false)
                 .show()
+        }
+
+        viewModel.autoRestoreCheckDone.observe(this) {
+            // Check finished. If it did NOT raise a "Backup found" prompt, release the gate now;
+            // otherwise the prompt's Import/Skip handler releases it after the user decides.
+            if (viewModel.autoRestorePrompt.value == null) {
+                awaitingAutoRestore = false
+                tryShowOnboarding()
+            }
         }
 
 
@@ -899,6 +949,7 @@ class MainActivity : AppCompatActivity() {
             && !offeredAllFilesAccess
         ) {
             offeredAllFilesAccess = true
+            allFilesPromptActive = true   // block onboarding until this decision is made
             androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("PDF access")
                 .setMessage(
@@ -918,7 +969,14 @@ class MainActivity : AppCompatActivity() {
                 // hashing when the user returns.  Without this listener, dismissing the dialog
                 // via back-press or outside-tap would leave deferred hashing stuck forever.
                 .setOnDismissListener {
-                    if (!launchedAllFilesSettings) viewModel.resumeDeferredHashing()
+                    if (!launchedAllFilesSettings) {
+                        // Skip / back / outside-tap — decision made without leaving the app.
+                        viewModel.resumeDeferredHashing()
+                        allFilesPromptActive = false
+                        tryShowOnboarding()
+                    }
+                    // Grant path keeps allFilesPromptActive true until the Settings screen
+                    // returns via allFilesAccessLauncher, which clears it and retries onboarding.
                     launchedAllFilesSettings = false
                 }
                 .show()
@@ -994,6 +1052,11 @@ class MainActivity : AppCompatActivity() {
             if (s.totalPdfs > 0)
                 appendLine(rowB("PDFs",    s.visiblePdfBytes,   s.hiddenPdfBytes))
             appendLine(rowB("All",     vbAll, hbAll))
+            appendLine()
+            val ds = DeletionStatsStore.getInstance(this@MainActivity)
+            appendLine("CLEANED UP (lifetime)")
+            appendLine("Deleted   %,d items".format(ds.deletedCount))
+            appendLine("Freed     %s".format(fmtBytes(ds.deletedBytes)))
             appendLine()
             append(s.integrityDetail)
         }
@@ -1318,6 +1381,9 @@ Built for people with years of accumulated photos, videos, PDFs and audio files 
 ─────────────────────────────
 📊 STAT CARDS (top bar)
 Three cards always visible: 📷 Photos · 🎬 Videos · 🎵 Audio. A 📄 PDFs card appears when PDFs are present. Each card shows total count, hidden count, and size. Tap a card to toggle that type on/off — at least one must stay active.
+
+📈 STATS (ⓘ in the toolbar)
+Tap the info icon for a full breakdown of counts and sizes (visible + hidden = total) per type. It also shows your lifetime "Cleaned up" total — how many items you've deleted through the app and how much space that freed. This running total survives reinstalls.
 
 📂 BROWSING (Tree View)
 Years are shown collapsed. Each year row shows a type breakdown (📷/🎬/🎵/📄 with counts), how many months have been curated, and thumbnail previews from the start and end of the year. Tap a year to expand it and see its months. Tap a month to see its items. Tap again to collapse.

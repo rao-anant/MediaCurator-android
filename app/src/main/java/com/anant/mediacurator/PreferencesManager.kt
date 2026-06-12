@@ -96,6 +96,12 @@ class PreferencesManager(context: Context) {
         prefs.edit().putBoolean(KEY_PHOTO_DUPLICATE_DETECTION, enabled).apply()
     }
 
+    /** First-run onboarding: true once the user has seen the "how curation works" intro. */
+    fun hasSeenOnboarding(): Boolean = prefs.getBoolean(KEY_SEEN_ONBOARDING, false)
+    fun setSeenOnboarding() {
+        prefs.edit().putBoolean(KEY_SEEN_ONBOARDING, true).apply()
+    }
+
     fun monthKey(year: Int, month: Int): String {
         val m = if (month < 10) "0$month" else month.toString()
         return "$year-$m"
@@ -115,5 +121,6 @@ class PreferencesManager(context: Context) {
         private const val KEY_EXPANDED_SUBGROUPS   = "expanded_subgroups"
         private const val KEY_PDF_CONTENT_SEARCH        = "pdf_content_search"
         private const val KEY_PHOTO_DUPLICATE_DETECTION = "photo_duplicate_detection"
+        private const val KEY_SEEN_ONBOARDING           = "seen_onboarding"
     }
 }

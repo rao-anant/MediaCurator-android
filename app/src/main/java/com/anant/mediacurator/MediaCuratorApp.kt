@@ -7,5 +7,8 @@ class MediaCuratorApp : Application() {
         super.onCreate()
         DebugLog.init(this)
         DebugLog.installCrashHandler()
+        // Restore the lifetime deletion counter from its Downloads mirror if this is a
+        // fresh install (does its own background I/O; no-op once prefs hold a value).
+        DeletionStatsStore.getInstance(this).ensureRestored()
     }
 }

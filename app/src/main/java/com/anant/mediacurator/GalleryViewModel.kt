@@ -115,6 +115,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private val _autoRestorePrompt = MutableLiveData<Set<String>?>()
     val autoRestorePrompt: LiveData<Set<String>?> = _autoRestorePrompt
 
+    // Fires once the auto-restore check finishes, whether or not it raised a prompt — lets
+    // the Activity know the first-run setup flow is settled (e.g. to release the onboarding gate).
+    private val _autoRestoreCheckDone = MutableLiveData<Unit>()
+    val autoRestoreCheckDone: LiveData<Unit> = _autoRestoreCheckDone
+
     // ── Image labels ──────────────────────────────────────────────────────────
     // Map of MediaItem.id → list of ML Kit label strings (e.g. ["Beach","Sky"]).
     // Populated lazily in the background after each media load; surviving labels from
@@ -764,6 +769,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun updateUiAfterDeletion(fingerprints: List<String>, bytesFreed: Long = 0L) {
         if (bytesFreed > 0L) _storageSavedEvent.postValue(bytesFreed)
+
+        // Lifetime cumulative-deletion counter (shown in the Stats dialog).
+        DeletionStatsStore.getInstance(getApplication()).record(fingerprints.size, bytesFreed)
 
         // Immediately remove deleted items from the flat list so MediaViewerActivity
         // can advance to the next item without waiting for the first MediaStore refresh.
@@ -1798,6 +1806,10 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 DebugLog.e("gallery", "Auto-restore check failed", e)
+            } finally {
+                // Always signal completion so the Activity can settle its first-run flow,
+                // even when no backup was found or the read failed.
+                _autoRestoreCheckDone.postValue(Unit)
             }
         }
     }

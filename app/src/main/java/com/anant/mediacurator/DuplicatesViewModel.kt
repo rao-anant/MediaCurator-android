@@ -40,6 +40,7 @@ class DuplicatesViewModel(app: Application) : AndroidViewModel(app) {
 
     private var pendingDeleteItems: List<MediaItem> = emptyList()
     private var directlyDeletedCount = 0
+    private var directlyDeletedBytes = 0L
 
     // ── Loading ───────────────────────────────────────────────────────────────
 
@@ -132,6 +133,7 @@ class DuplicatesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             val resolver = getApplication<Application>().contentResolver
             var deleted = 0
+            var deletedBytes = 0L
             val needPermission = mutableListOf<MediaItem>()
 
             for (item in toDelete) {
@@ -140,6 +142,7 @@ class DuplicatesViewModel(app: Application) : AndroidViewModel(app) {
                     if (rows > 0) {
                         photoHashStore.deleteEntry(item.id)
                         deleted++
+                        deletedBytes += item.size
                     } else {
                         needPermission.add(item)
                     }
@@ -157,12 +160,13 @@ class DuplicatesViewModel(app: Application) : AndroidViewModel(app) {
                 if (intentSender != null) {
                     pendingDeleteItems = needPermission
                     directlyDeletedCount = deleted
+                    directlyDeletedBytes = deletedBytes
                     _deletePermissionRequest.postValue(intentSender)
                     return@launch
                 }
             }
 
-            withContext(Dispatchers.Main) { finishDeletion(deleted) }
+            withContext(Dispatchers.Main) { finishDeletion(deleted, deletedBytes) }
         }
     }
 
@@ -170,23 +174,28 @@ class DuplicatesViewModel(app: Application) : AndroidViewModel(app) {
     fun onDeletePermissionResult(granted: Boolean) {
         val items = pendingDeleteItems
         val alreadyDeleted = directlyDeletedCount
+        val alreadyBytes   = directlyDeletedBytes
         pendingDeleteItems = emptyList()
         directlyDeletedCount = 0
+        directlyDeletedBytes = 0L
         _deletePermissionRequest.value = null
 
         if (granted && items.isNotEmpty()) {
             viewModelScope.launch(Dispatchers.IO) {
                 items.forEach { photoHashStore.deleteEntry(it.id) }
                 photoHashStore.flush()
-                withContext(Dispatchers.Main) { finishDeletion(alreadyDeleted + items.size) }
+                val bytes = alreadyBytes + items.sumOf { it.size }
+                withContext(Dispatchers.Main) { finishDeletion(alreadyDeleted + items.size, bytes) }
             }
         } else {
-            finishDeletion(alreadyDeleted)
+            finishDeletion(alreadyDeleted, alreadyBytes)
         }
     }
 
-    private fun finishDeletion(totalDeleted: Int) {
+    private fun finishDeletion(totalDeleted: Int, totalBytes: Long) {
         _deletionResult.value = totalDeleted
+        // Lifetime cumulative-deletion counter (shown in the gallery Stats dialog).
+        DeletionStatsStore.getInstance(getApplication()).record(totalDeleted, totalBytes)
         // Reload to reflect the new state (deleted items gone, orphaned groups removed)
         loadDuplicates()
     }
