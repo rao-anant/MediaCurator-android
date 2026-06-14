@@ -68,6 +68,22 @@
         android:gravity="center"
         android:visibility="gone" />
 
+    <!-- PDF badge (bottom-left): shown only for PDF tiles so documents are distinguishable -->
+    <TextView
+        android:id="@+id/tvPdfBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="4dp"
+        android:paddingHorizontal="5dp"
+        android:paddingVertical="1dp"
+        android:background="@drawable/pdf_badge_bg"
+        android:text="PDF"
+        android:textColor="@android:color/white"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
     <!-- Size / duration (bottom-right): always shown -->
     <TextView
         android:id="@+id/tvDuration"
@@ -81,6 +97,21 @@
         android:textSize="11sp"
         android:textStyle="bold"
         android:singleLine="true"
+        android:visibility="gone" />
+
+    <!-- DEBUG overlay: item id + type. Toggle via GalleryAdapter.DEBUG_OVERLAY. Remove before release. -->
+    <TextView
+        android:id="@+id/tvDebugId"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="2dp"
+        android:paddingHorizontal="4dp"
+        android:paddingVertical="1dp"
+        android:background="#CCCC0000"
+        android:textColor="@android:color/white"
+        android:textSize="10sp"
+        android:textStyle="bold"
         android:visibility="gone" />
 
     <View

@@ -526,7 +526,10 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 galleryItems = treeItems
-                flatForViewer = visibleGroups.flatMap { it.items }
+                // Viewer swipes through exactly what the grid renders — i.e. items in EXPANDED
+                // months/sub-groups only.  Using visibleGroups.flatMap here instead would let
+                // prev/next wander into collapsed months' photos that aren't on screen.
+                flatForViewer = treeItems.mapNotNull { (it as? GalleryItem.Media)?.mediaItem }
             }
 
             // Guard: if this job was cancelled (e.g. a newer loadMedia call superseded it),
@@ -919,6 +922,15 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
      * just before opening the viewer from a search result tap.
      */
     fun setSearchFlatItems(items: List<MediaItem>) {
+        _flatMediaItems.value = items
+    }
+
+    /**
+     * Point [flatMediaItems] at [items] so [MediaViewerActivity] swipes through just this
+     * subset (the tapped photo's month, in rendered order) rather than the whole gallery.
+     * Reset to the full gallery list on the next [loadMedia].
+     */
+    fun setViewerItems(items: List<MediaItem>) {
         _flatMediaItems.value = items
     }
 

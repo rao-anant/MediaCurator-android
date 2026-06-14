@@ -123,8 +123,21 @@ class DeletionStatsStore private constructor(context: Context) {
     }
 
     private fun readBackup(): String? {
+        @Suppress("DEPRECATION")
+        val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), BACKUP_FILENAME)
         return try {
+            // Pass 1: direct file path when MANAGE_EXTERNAL_STORAGE is granted.  This is the
+            // ONLY reliable path on reinstall — a fresh install can't read the previous
+            // install's non-media Downloads file via MediaStore without that permission.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && android.os.Environment.isExternalStorageManager()
+                && file.exists()
+            ) {
+                return file.readText(Charsets.UTF_8)
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Pass 2: MediaStore (works for files this install created — same session).
                 val resolver   = app.contentResolver
                 val collection = MediaStore.Downloads.getContentUri("external")
                 val uri = resolver.query(
@@ -133,16 +146,11 @@ class DeletionStatsStore private constructor(context: Context) {
                     "${MediaStore.Downloads.DATE_MODIFIED} DESC"
                 )?.use { c ->
                     if (c.moveToFirst()) ContentUris.withAppendedId(collection, c.getLong(0)) else null
-                } ?: run {
-                    @Suppress("DEPRECATION")
-                    val f = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), BACKUP_FILENAME)
-                    return if (f.exists()) f.readText(Charsets.UTF_8) else null
                 }
-                resolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                if (uri != null) resolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                else if (file.exists()) file.readText(Charsets.UTF_8) else null
             } else {
-                @Suppress("DEPRECATION")
-                val f = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), BACKUP_FILENAME)
-                if (f.exists()) f.readText(Charsets.UTF_8) else null
+                if (file.exists()) file.readText(Charsets.UTF_8) else null
             }
         } catch (e: Exception) {
             Log.e("DeletionStats", "readBackup failed", e); null

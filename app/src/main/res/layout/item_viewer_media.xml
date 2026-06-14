@@ -11,6 +11,22 @@
         android:layout_height="match_parent"
         android:visibility="gone" />
 
+    <!-- DEBUG overlay: item id + type + position. Toggle via MediaViewerActivity.DEBUG_OVERLAY. Remove before release. -->
+    <TextView
+        android:id="@+id/tvDebugId"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="8dp"
+        android:paddingHorizontal="6dp"
+        android:paddingVertical="3dp"
+        android:background="#CCCC0000"
+        android:textColor="@android:color/white"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:elevation="10dp"
+        android:visibility="gone" />
+
     <FrameLayout
         android:id="@+id/videoContainer"
         android:layout_width="match_parent"
@@ -41,5 +57,21 @@
             android:textColor="@android:color/white"
             android:visibility="gone" />
     </FrameLayout>
+
+    <!-- PDF hint: shown over the rendered first page; tap anywhere opens the PDF externally -->
+    <TextView
+        android:id="@+id/tvPdfHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="96dp"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="8dp"
+        android:background="#CC000000"
+        android:text="Tap to open PDF"
+        android:textColor="@android:color/white"
+        android:textSize="14sp"
+        android:elevation="6dp"
+        android:visibility="gone" />
 
 </FrameLayout>

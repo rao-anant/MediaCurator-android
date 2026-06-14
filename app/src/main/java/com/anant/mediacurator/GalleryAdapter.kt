@@ -30,6 +30,9 @@ class GalleryAdapter(
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
+        // DEBUG: show item id + type on each thumbnail. Flip to true to diagnose; ship false.
+        const val DEBUG_OVERLAY = false
+
         const val TYPE_YEAR_HEADER = 0
         const val TYPE_HEADER      = 1
         const val TYPE_MEDIA       = 2
@@ -319,6 +322,8 @@ class GalleryAdapter(
         private val infoLabel: TextView = itemView.findViewById(R.id.tvDuration)
         private val dateLabel: TextView = itemView.findViewById(R.id.tvDate)
         private val filenameLabel: TextView = itemView.findViewById(R.id.tvFilename)
+        private val pdfBadge: TextView = itemView.findViewById(R.id.tvPdfBadge)
+        private val debugId: TextView = itemView.findViewById(R.id.tvDebugId)
         private var pdfJob: Job? = null
 
         fun bind(media: GalleryItem.Media) {
@@ -326,6 +331,16 @@ class GalleryAdapter(
             pdfJob = null
 
             val item = media.mediaItem
+
+            if (DEBUG_OVERLAY) {
+                debugId.visibility = View.VISIBLE
+                debugId.text = "${item.id}\n${item.type}"
+            } else {
+                debugId.visibility = View.GONE
+            }
+
+            // PDF badge — distinguishes document tiles from photos (recycled view: set every bind).
+            pdfBadge.visibility = if (item.type == MediaType.PDF) View.VISIBLE else View.GONE
             val isFeatured = (media.indexInMonth % 10) == 0
             (imageView as? SquareImageView)?.ratio = if (isFeatured) 1.2f else 1.0f
 

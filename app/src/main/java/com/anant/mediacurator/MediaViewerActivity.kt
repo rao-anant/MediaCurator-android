@@ -23,8 +23,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.bumptech.glide.Glide
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.anant.mediacurator.databinding.ActivityMediaViewerBinding
@@ -61,6 +66,8 @@ class MediaViewerActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_START_POSITION = "extra_start_position"
         const val EXTRA_START_ID = "extra_start_id"
+        // DEBUG: show item id + type + position on each viewer page. Flip to true to diagnose; ship false.
+        const val DEBUG_OVERLAY = false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -370,11 +377,30 @@ class MediaViewerActivity : AppCompatActivity() {
         override fun getItemCount() = items.size
 
         inner class ViewHolder(val binding: ItemViewerMediaBinding) : RecyclerView.ViewHolder(binding.root) {
+            private var pdfJob: Job? = null
+
             fun bind(item: MediaItem) {
-                // Reset state from previous bind
+                // Reset state from previous bind.  ViewPager2 recycles ViewHolders, so any
+                // state a prior item type set must be cleared here — otherwise e.g. a PDF/audio
+                // page's "Tap to open" overlay leaks onto a recycled video/image page.
+                pdfJob?.cancel()
+                pdfJob = null
                 binding.videoView.stopPlayback()
                 binding.photoView.setOnPhotoTapListener(null)
                 binding.photoView.setOnOutsidePhotoTapListener(null)
+                binding.photoView.setImageDrawable(null)
+                binding.tvError.isVisible = false
+                binding.tvError.text = ""
+                binding.tvPdfHint.isVisible = false
+                binding.tvPdfHint.setOnClickListener(null)
+                binding.videoContainer.setOnClickListener(null)
+
+                if (DEBUG_OVERLAY) {
+                    binding.tvDebugId.isVisible = true
+                    binding.tvDebugId.text = "id=${item.id}  ${item.type}  [${bindingAdapterPosition + 1}/${items.size}]"
+                } else {
+                    binding.tvDebugId.isVisible = false
+                }
 
                 when (item.type) {
                     MediaType.IMAGE -> {
@@ -435,13 +461,15 @@ class MediaViewerActivity : AppCompatActivity() {
                         }
                     }
                     MediaType.PDF -> {
-                        // PDFs open externally from the gallery; if reached here via swipe, show placeholder
-                        binding.photoView.isVisible = false
-                        binding.videoContainer.isVisible = true
-                        binding.btnPlayPause.isVisible = false
-                        binding.tvError.isVisible = true
-                        binding.tvError.text = "Tap to open PDF"
-                        binding.videoContainer.setOnClickListener {
+                        // Render the first page so the viewer shows the document (like the grid),
+                        // with a persistent "Tap to open PDF" hint.  Tapping launches an external
+                        // PDF viewer — PDFs can't be read inline here.
+                        binding.videoContainer.isVisible = false
+                        binding.photoView.isVisible = true
+                        binding.photoView.setImageDrawable(null)
+                        binding.tvPdfHint.isVisible = true
+
+                        val open = {
                             val openIntent = Intent(Intent.ACTION_VIEW).apply {
                                 setDataAndType(Uri.parse(item.uri), "application/pdf")
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -449,12 +477,44 @@ class MediaViewerActivity : AppCompatActivity() {
                             try {
                                 binding.root.context.startActivity(openIntent)
                             } catch (e: Exception) {
-                                // No default set yet — fall back to chooser so user can pick and remember
                                 try {
                                     binding.root.context.startActivity(
                                         Intent.createChooser(openIntent, "Open PDF with")
                                     )
                                 } catch (e2: Exception) { /* no PDF viewer installed */ }
+                            }
+                        }
+                        binding.photoView.setOnPhotoTapListener { _, _, _ -> open() }
+                        binding.photoView.setOnOutsidePhotoTapListener { open() }
+                        // Hint is always tappable, even before/if the page render finishes.
+                        binding.tvPdfHint.setOnClickListener { open() }
+
+                        val appContext = binding.root.context.applicationContext
+                        val uri = Uri.parse(item.uri)
+                        val targetId = item.id
+                        binding.photoView.tag = targetId
+                        pdfJob = lifecycleScope.launch {
+                            val bitmap = withContext(Dispatchers.IO) {
+                                try {
+                                    appContext.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                                        android.graphics.pdf.PdfRenderer(pfd).use { renderer ->
+                                            renderer.openPage(0).use { page ->
+                                                val target = 1440
+                                                val scale  = target.toFloat() / maxOf(page.width, page.height)
+                                                val w = (page.width * scale).toInt().coerceAtLeast(1)
+                                                val h = (page.height * scale).toInt().coerceAtLeast(1)
+                                                val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+                                                bmp.eraseColor(android.graphics.Color.WHITE)
+                                                page.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                                bmp
+                                            }
+                                        }
+                                    }
+                                } catch (e: Exception) { null }
+                            }
+                            // Guard against view recycling: only apply if still bound to this item.
+                            if (binding.photoView.tag == targetId && bitmap != null) {
+                                binding.photoView.setImageBitmap(bitmap)
                             }
                         }
                     }

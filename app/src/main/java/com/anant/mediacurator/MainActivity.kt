@@ -108,6 +108,9 @@ class MainActivity : AppCompatActivity() {
             }
             // If photo hashing was deferred waiting for this permission, start it now.
             viewModel.resumeDeferredHashing()
+            // Now that all-files access may be granted, retry restoring the lifetime deletion
+            // counter from its Downloads mirror (the startup attempt ran before this permission).
+            DeletionStatsStore.getInstance(this).ensureRestored()
             // PDF-access decision is now resolved — onboarding may proceed.
             allFilesPromptActive = false
             tryShowOnboarding()
@@ -286,6 +289,16 @@ class MainActivity : AppCompatActivity() {
                             .filterIsInstance<GalleryItem.Media>()
                             .map { it.mediaItem }
                         viewModel.setSearchFlatItems(mediaItems)
+                    } else {
+                        // Confine the viewer to the tapped photo's month, in the grid's exact
+                        // rendered order.  Prev/Next then stays within that month and won't jump
+                        // into other (even adjacent, expanded) months.  In flat size-sorted mode
+                        // every Media has an empty monthKey, so this naturally spans the whole
+                        // list — matching that view, which shows everything in one sequence.
+                        val rendered = adapter.currentList.filterIsInstance<GalleryItem.Media>()
+                        val monthKey = rendered.firstOrNull { it.mediaItem.id == item.id }?.monthKey
+                        val monthItems = rendered.filter { it.monthKey == monthKey }.map { it.mediaItem }
+                        if (monthItems.isNotEmpty()) viewModel.setViewerItems(monthItems)
                     }
                     val intent = Intent(this, MediaViewerActivity::class.java).apply {
                         putExtra(MediaViewerActivity.EXTRA_START_ID, item.id)
@@ -1390,6 +1403,9 @@ Years are shown collapsed. Each year row shows a type breakdown (📷/🎬/🎵/
 
 📌 STICKY HEADER
 While scrolling inside a year/month, a floating bar stays pinned at the top showing where you are. Tap it to collapse the open month (or the year, if no month is open).
+
+📄 PDF FILES
+PDF tiles show the document's first page as the thumbnail with a small "PDF" badge. Open one to preview the first page full-screen; tap it to open the PDF in your preferred PDF app.
 
 🙈 HIDING A MONTH
 Scroll to the bottom of any open month and tap "Hide this month". The month disappears from your gallery — files are NOT deleted, just hidden from this app.
