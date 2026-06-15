@@ -106,9 +106,16 @@ object SearchEngine {
                 }
 
                 // --- filename token candidates: no confidence weight ---
-                for (part in fileTokens) {
-                    val s = fuzzyScore(token, part)
-                    if (s > bestScore) { bestScore = s; bestLabel = ""; bestFilePart = part }
+                // Skip purely-numeric query tokens for photos/videos — they match the long
+                // digit runs in auto-generated camera names (IMG_105734018575) as pure noise.
+                // PDFs still allow numeric filename matches (e.g. "invoice_401.pdf"), and PDF
+                // content is matched separately via BM25 below.
+                val numericToken = token.all { it.isDigit() }
+                if (item.type == MediaType.PDF || !numericToken) {
+                    for (part in fileTokens) {
+                        val s = fuzzyScore(token, part)
+                        if (s > bestScore) { bestScore = s; bestLabel = ""; bestFilePart = part }
+                    }
                 }
 
                 // --- PDF content: BM25 inverted-index lookup ---
@@ -157,12 +164,25 @@ object SearchEngine {
         query.trim().lowercase().split(Regex("\\s+")).filter { it.length >= 2 }
 
     /**
-     * Split a filename into searchable parts.
-     * "IMG_20230415_beach_trip.jpg" → ["img", "20230415", "beach", "trip"]
+     * Generic auto-generated filename tokens that carry no search meaning and would
+     * otherwise match thousands of files (every camera photo, every video).  Searching
+     * "IMG" or "jpg" should not return the whole library.  (Meaningful words like
+     * "screenshot" are deliberately NOT here — users may want to find those.)
+     */
+    private val FILENAME_STOPWORDS = setOf(
+        "img", "image", "vid", "video", "dsc", "dscn", "pxl", "mvimg",
+        "jpg", "jpeg", "png", "gif", "heic", "heif", "webp",
+        "mp4", "mov", "3gp", "mpeg", "mkv", "wa", "dcim"
+    )
+
+    /**
+     * Split a filename into searchable parts, dropping generic auto-generated tokens.
+     * "IMG_20230415_beach_trip.jpg" → ["20230415", "beach", "trip"]  ("img" dropped)
      */
     private fun filenameTokens(displayName: String): List<String> {
         val base = displayName.substringBeforeLast('.').lowercase()
-        return base.split(Regex("[^a-z0-9]+")).filter { it.length >= 2 }
+        return base.split(Regex("[^a-z0-9]+"))
+            .filter { it.length >= 2 && it !in FILENAME_STOPWORDS }
     }
 
     /**

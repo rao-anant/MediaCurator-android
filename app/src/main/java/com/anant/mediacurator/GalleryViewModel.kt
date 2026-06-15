@@ -903,12 +903,28 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 SearchEngine.search(query, allMedia, labels, bm25)
             }
 
+            // Mark results that belong to hidden (done) months so the user knows a hit
+            // came from a month they've already curated away. Month key derives from
+            // dateTaken, identical to the gallery's grouping.
+            val doneMonths = prefs.getDoneMonths()
+            val cal = java.util.Calendar.getInstance()
+
             val items = results.mapIndexed { idx, r ->
+                cal.timeInMillis = r.item.dateTaken
+                val mk = prefs.monthKey(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1)
+                val hidden = doneMonths.contains(mk)
+                val reason = r.matchReason
+                val label = when {
+                    hidden && reason.isNotBlank() -> "🙈 $reason"
+                    hidden                        -> "🙈 hidden"
+                    reason.isNotBlank()           -> reason
+                    else                          -> null
+                }
                 GalleryItem.Media(
                     mediaItem         = r.item,
                     monthKey          = "",
                     indexInMonth      = idx,
-                    dateLabel         = r.matchReason.ifBlank { null },
+                    dateLabel         = label,
                     structuralVersion = 0
                 )
             }

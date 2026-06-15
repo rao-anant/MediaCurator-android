@@ -1439,6 +1439,8 @@ PDF content is also indexed and searched. The first 5 pages of each PDF are inde
 
 Multi-word queries use AND logic: "dog beach" only returns items tagged with BOTH concepts.
 
+A result from a hidden month is marked with a 🙈 — so you can tell a match comes from a month you've already curated away. (Generic filename bits like "IMG", "jpg" or plain numbers are ignored, so they don't flood results with every camera photo.)
+
 💾 BACKUP (menu → Export / Import hidden months list)
 Hidden-month state is auto-saved to mediacurator_hidden.json in your Downloads folder after every hide/unhide. It survives app-data clears and reinstalls — just reinstall and the state restores automatically. Use Export / Import hidden months list to move your state to another device.
 
