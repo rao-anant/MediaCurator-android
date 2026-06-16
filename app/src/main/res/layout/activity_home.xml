@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/background">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        app:title="Media Curator"
+        app:titleTextColor="@color/on_surface" />
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/tvLibrarySummary"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="14dp"
+                android:text="17k items · 62 GB · 6.0k reviewed"
+                android:textColor="@color/on_surface_variant"
+                android:textSize="15sp" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardHero"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                app:cardBackgroundColor="@color/surface"
+                app:cardCornerRadius="16dp"
+                app:strokeColor="@color/check_green"
+                app:strokeWidth="2dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="12dp">
+                        <ImageView
+                            android:layout_width="22dp"
+                            android:layout_height="22dp"
+                            android:src="@drawable/ic_home_curate"
+                            app:tint="@color/check_green"
+                            android:layout_marginEnd="8dp"
+                            android:contentDescription="@null" />
+                        <TextView
+                            android:id="@+id/tvHeroTitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Continue curating"
+                            android:textColor="@color/on_surface"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/heroProgressRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+                        <ProgressBar
+                            android:id="@+id/progressHero"
+                            style="@android:style/Widget.ProgressBar.Horizontal"
+                            android:layout_width="0dp"
+                            android:layout_height="6dp"
+                            android:layout_weight="1"
+                            android:max="100"
+                            android:progress="42"
+                            android:progressTint="@color/check_green" />
+                        <TextView
+                            android:id="@+id/tvHeroPct"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="10dp"
+                            android:text="42% overall"
+                            android:textColor="@color/check_green"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="0.5dp"
+                        android:layout_marginVertical="12dp"
+                        android:background="@color/surface_variant" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+                            <TextView
+                                android:id="@+id/tvHeroCaption"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Pick up at"
+                                android:textColor="@color/on_surface_variant"
+                                android:textSize="11sp" />
+                            <TextView
+                                android:id="@+id/tvHeroResume"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="October 2024"
+                                android:textColor="@color/on_surface"
+                                android:textSize="15sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnHeroAction"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Resume"
+                            app:icon="@drawable/ic_home_curate"
+                            app:iconSize="18dp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="10dp">
+                <include layout="@layout/item_home_card" android:id="@+id/cardSpace"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+                <Space android:layout_width="10dp" android:layout_height="1dp" />
+                <include layout="@layout/item_home_card" android:id="@+id/cardDuplicates"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <include layout="@layout/item_home_card" android:id="@+id/cardSearch"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+                <Space android:layout_width="10dp" android:layout_height="1dp" />
+                <include layout="@layout/item_home_card" android:id="@+id/cardHidden"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+</LinearLayout>

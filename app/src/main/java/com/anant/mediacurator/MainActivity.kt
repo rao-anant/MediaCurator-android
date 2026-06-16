@@ -50,6 +50,7 @@ class MainActivity : AppCompatActivity() {
     private var launchedAllFilesSettings = false  // Grant tapped → Settings open → resume handled by launcher
     private var allFilesPromptActive = false   // true while the PDF-access prompt/Settings is mid-flow
     private var awaitingAutoRestore = false     // true from auto-restore check start until it settles
+    private var pendingResumeKey: String? = null  // Home "Resume" deep-link: scroll here once its header appears
 
     // Jump toggle: remembers the two positions so the swap FAB can bounce back and forth
     private var jumpAMonthKey: String? = null  // where we came FROM
@@ -128,6 +129,19 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setOnClickListener { showSortPopup() }
+        // When opened from the Home hub, show an Up arrow back to it (consistent with the
+        // other spokes like Duplicates). Once Home becomes the launcher this is always true.
+        if (intent.getBooleanExtra(HomeActivity.EXTRA_FROM_HOME, false)) {
+            supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        }
+        // Deep-links from the Home hub — applied before the first load below.
+        intent.getStringExtra(HomeActivity.EXTRA_SORT)?.let { name ->
+            runCatching { viewModel.setInitialSort(SortMode.valueOf(name)) }
+        }
+        intent.getStringExtra(HomeActivity.EXTRA_RESUME_MONTH_KEY)?.let { key ->
+            pendingResumeKey = key
+            viewModel.requestOpenAtMonth(key)
+        }
         // Pad the bottom bar and FAB so they clear the gesture/nav-button bar on Android 15+
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val navBar = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
@@ -258,6 +272,12 @@ class MainActivity : AppCompatActivity() {
             adapter.selectionMode -> exitSelectionMode()
             else                  -> super.onBackPressed()
         }
+    }
+
+    // Up arrow (shown only when opened from the Home hub): exit selection first, else return to Home.
+    override fun onSupportNavigateUp(): Boolean {
+        if (adapter.selectionMode) exitSelectionMode() else finish()
+        return true
     }
 
     private fun setupRecyclerView() {
@@ -527,6 +547,17 @@ class MainActivity : AppCompatActivity() {
             if (items.isEmpty() && !isLoading) binding.tvEmpty.text = resolveEmptyMessage()
             binding.recyclerView.post { updateStickyHeader() }
             tryShowOnboarding()
+
+            // Home "Resume" deep-link: scroll to the target month once its header is in the
+            // list, then clear (so later startup loads don't keep yanking the scroll).
+            pendingResumeKey?.let { key ->
+                val pos = items.indexOfFirst { it is GalleryItem.Header && it.monthKey == key }
+                if (pos >= 0) {
+                    (binding.recyclerView.layoutManager as? GridLayoutManager)?.scrollToPositionWithOffset(pos, 0)
+                    binding.appBarLayout.setExpanded(true, false)
+                    pendingResumeKey = null
+                }
+            }
         }
 
         viewModel.searchResults.observe(this) { results ->

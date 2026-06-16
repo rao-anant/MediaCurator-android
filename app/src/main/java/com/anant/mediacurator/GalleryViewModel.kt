@@ -311,6 +311,29 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Apply a sort mode for a deep-link entry (e.g. Home's "Free up space" card) WITHOUT
+     * triggering its own load — the imminent startup load picks it up.
+     */
+    fun setInitialSort(mode: SortMode) {
+        if (_sortMode.value != mode) {
+            _sortMode.value = mode
+            prefs.saveSortMode(mode)
+            structuralVersion++
+        }
+    }
+
+    /**
+     * Pre-expand a month so a deep-link (Home "Resume") lands inside it. No load here —
+     * the next build reflects the expansion; the Activity scrolls once the header appears.
+     */
+    fun requestOpenAtMonth(monthKey: String) {
+        val year = monthKey.substringBefore('-').toIntOrNull() ?: return
+        expandedYears.add(year)
+        expandedMonths.add(monthKey)
+        structuralVersion++
+    }
+
     fun loadMedia(forceRefresh: Boolean = false) {
         val sortMode = _sortMode.value ?: SortMode.DATE_OLDEST
         val photoOn = _includePhoto.value ?: true
@@ -326,7 +349,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
             // 1. Get raw media from repository or local cache.
             val rawMedia = if (forceRefresh || cachedRawMedia == null) {
-                val fetched = repo.fetchAllMedia()
+                // Shared with HomeActivity so we don't scan MediaStore twice on cold start.
+                val fetched = MediaCache.get(repo, forceRefresh)
 
                 // Data-driven cleanup for the cross-Activity shared set: clear a fingerprint
                 // only when MediaStore confirms the item is actually gone.
@@ -772,6 +796,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun updateUiAfterDeletion(fingerprints: List<String>, bytesFreed: Long = 0L) {
         if (bytesFreed > 0L) _storageSavedEvent.postValue(bytesFreed)
+
+        // Library changed — drop the shared cache so the Home hub recomputes fresh counts.
+        MediaCache.invalidate()
 
         // Lifetime cumulative-deletion counter (shown in the Stats dialog).
         DeletionStatsStore.getInstance(getApplication()).record(fingerprints.size, bytesFreed)

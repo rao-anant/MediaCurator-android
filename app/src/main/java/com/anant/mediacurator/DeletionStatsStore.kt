@@ -90,12 +90,27 @@ class DeletionStatsStore private constructor(context: Context) {
         "{\"deletedCount\": $deletedCount, \"deletedBytes\": $deletedBytes}"
 
     private fun writeBackup() {
+        @Suppress("DEPRECATION")
+        val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), BACKUP_FILENAME)
         try {
+            // Pass 1: direct file write when MANAGE_EXTERNAL_STORAGE is granted.  This overwrites
+            // the canonical Downloads/<name> in place — no MediaStore auto-numbering — so the
+            // file the restore reads is always the latest, and it survives reinstall.  (MediaStore
+            // insert would create "name (1).json" on reinstall, leaving the canonical file stale.)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && android.os.Environment.isExternalStorageManager()
+            ) {
+                file.parentFile?.mkdirs()
+                file.writeText(json(), Charsets.UTF_8)
+                // Clean up any numbered strays a previous (permission-less) run may have left.
+                cleanupNumberedStrays(file.parentFile)
+                return
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Pass 2: no all-files permission — best-effort via MediaStore (own-package file).
                 val resolver   = app.contentResolver
                 val collection = MediaStore.Downloads.getContentUri("external")
-                // Overwrite the existing file in place (avoids "(1)" auto-numbering): find it,
-                // truncate-write; otherwise insert a fresh row.
                 val existing = resolver.query(
                     collection, arrayOf(MediaStore.Downloads._ID),
                     "${MediaStore.Downloads.DISPLAY_NAME} = ?", arrayOf(BACKUP_FILENAME), null
@@ -109,11 +124,6 @@ class DeletionStatsStore private constructor(context: Context) {
                 }) ?: return
                 resolver.openOutputStream(uri, "wt")?.use { it.write(json().toByteArray(Charsets.UTF_8)) }
             } else {
-                @Suppress("DEPRECATION")
-                val file = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    BACKUP_FILENAME
-                )
                 file.parentFile?.mkdirs()
                 file.writeText(json(), Charsets.UTF_8)
             }
@@ -129,11 +139,13 @@ class DeletionStatsStore private constructor(context: Context) {
             // Pass 1: direct file path when MANAGE_EXTERNAL_STORAGE is granted.  This is the
             // ONLY reliable path on reinstall — a fresh install can't read the previous
             // install's non-media Downloads file via MediaStore without that permission.
+            // Pick the NEWEST of the canonical file + any numbered strays a previous
+            // (permission-less) run may have created, so we never read stale data.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
                 && android.os.Environment.isExternalStorageManager()
-                && file.exists()
             ) {
-                return file.readText(Charsets.UTF_8)
+                val newest = newestStatsFile(file.parentFile)
+                if (newest != null) return newest.readText(Charsets.UTF_8)
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -155,5 +167,20 @@ class DeletionStatsStore private constructor(context: Context) {
         } catch (e: Exception) {
             Log.e("DeletionStats", "readBackup failed", e); null
         }
+    }
+
+    /** Base name without extension, e.g. "mediacurator_stats" from "mediacurator_stats.json". */
+    private val baseName = BACKUP_FILENAME.removeSuffix(".json")
+
+    /** Newest of the canonical stats file + any "name (1).json" numbered strays, or null. */
+    private fun newestStatsFile(dir: File?): File? =
+        dir?.listFiles { f -> f.name.startsWith(baseName) && f.name.endsWith(".json") }
+            ?.maxByOrNull { it.lastModified() }
+
+    /** Delete numbered stray copies, keeping only the canonical file. */
+    private fun cleanupNumberedStrays(dir: File?) {
+        dir?.listFiles { f ->
+            f.name.startsWith(baseName) && f.name.endsWith(".json") && f.name != BACKUP_FILENAME
+        }?.forEach { try { it.delete() } catch (_: Exception) {} }
     }
 }
