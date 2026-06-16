@@ -34,6 +34,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun load() {
         viewModelScope.launch(Dispatchers.IO) {
+            DebugLog.i("home", "load: start")
             val media = MediaCache.get(repo)
             val done  = prefs.getDoneMonths()
 
@@ -56,9 +57,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             hashStore.ensureLoaded()
             val dupGroups = if (hashStore.countEntries() == 0) -1 else hashStore.findDuplicateGroups().size
 
-            _state.postValue(
-                buildState(media.size, totalSize, hiddenItems, totalMonths, doneMonths, resumeKey, dupGroups)
-            )
+            val state = buildState(media.size, totalSize, hiddenItems, totalMonths, doneMonths, resumeKey, dupGroups)
+            DebugLog.i("home", "load: done media=${media.size} months=$totalMonths/$doneMonths dup=$dupGroups -> '${state.summary}'")
+            _state.postValue(state)
         }
     }
 

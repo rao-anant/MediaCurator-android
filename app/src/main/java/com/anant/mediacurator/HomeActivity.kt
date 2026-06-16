@@ -52,10 +52,10 @@ class HomeActivity : AppCompatActivity() {
             startActivity(Intent(this, DuplicatesActivity::class.java))
         }
         bindCard(binding.cardSearch, R.drawable.ic_home_search, "Search", "Name, content, PDF text") {
-            openGallery()   // Stage 4: dedicated SearchActivity
+            openGallery(openSearch = true)   // interim; Stage 4 → dedicated SearchActivity
         }
         bindCard(binding.cardHidden, R.drawable.ic_home_hidden, "Hidden & stats", "…") {
-            openGallery()   // Stage 3b: deep-link to unhide / Stats
+            openGallery(showStats = true)    // gallery hosts the unhide UI + stats dialog
         }
 
         viewModel.state.observe(this) { s -> currentState = s; render(s) }
@@ -117,10 +117,15 @@ class HomeActivity : AppCompatActivity() {
         openGallery(resumeKey = currentState?.resumeMonthKey)
     }
 
-    private fun openGallery(resumeKey: String? = null, sort: String? = null) {
+    private fun openGallery(
+        resumeKey: String? = null, sort: String? = null,
+        openSearch: Boolean = false, showStats: Boolean = false
+    ) {
         val intent = Intent(this, MainActivity::class.java).putExtra(EXTRA_FROM_HOME, true)
         if (resumeKey != null) intent.putExtra(EXTRA_RESUME_MONTH_KEY, resumeKey)
         if (sort != null) intent.putExtra(EXTRA_SORT, sort)
+        if (openSearch) intent.putExtra(EXTRA_OPEN_SEARCH, true)
+        if (showStats) intent.putExtra(EXTRA_SHOW_STATS, true)
         startActivity(intent)
     }
 
@@ -130,8 +135,7 @@ class HomeActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.action_home_search -> { openGallery(); true }   // Stage 4: SearchActivity
-        R.id.action_home_help   -> { Toast.makeText(this, "Help (coming soon)", Toast.LENGTH_SHORT).show(); true }
+        R.id.action_home_help -> { Toast.makeText(this, "Help (coming soon)", Toast.LENGTH_SHORT).show(); true }
         else -> super.onOptionsItemSelected(item)
     }
 
@@ -142,5 +146,9 @@ class HomeActivity : AppCompatActivity() {
         const val EXTRA_RESUME_MONTH_KEY = "extra_resume_month_key"
         /** SortMode name to apply on open (e.g. "Free up space" → SIZE_ABSOLUTE). */
         const val EXTRA_SORT = "extra_sort"
+        /** Expand the gallery's search on open (interim until a dedicated SearchActivity). */
+        const val EXTRA_OPEN_SEARCH = "extra_open_search"
+        /** Show the stats dialog on open (Home "Hidden & stats" card). */
+        const val EXTRA_SHOW_STATS = "extra_show_stats"
     }
 }

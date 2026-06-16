@@ -312,13 +312,14 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Apply a sort mode for a deep-link entry (e.g. Home's "Free up space" card) WITHOUT
-     * triggering its own load — the imminent startup load picks it up.
+     * Apply a sort mode for a deep-link entry (e.g. Home's "Free up space" card) for THIS
+     * visit only — deliberately does NOT persist it, so it acts as a temporary lens and the
+     * user's chosen sort (set via the sort chip) is restored on the next normal open.
+     * No load here — the imminent startup load picks it up.
      */
     fun setInitialSort(mode: SortMode) {
         if (_sortMode.value != mode) {
             _sortMode.value = mode
-            prefs.saveSortMode(mode)
             structuralVersion++
         }
     }

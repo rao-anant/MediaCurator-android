@@ -51,6 +51,10 @@ class MainActivity : AppCompatActivity() {
     private var allFilesPromptActive = false   // true while the PDF-access prompt/Settings is mid-flow
     private var awaitingAutoRestore = false     // true from auto-restore check start until it settles
     private var pendingResumeKey: String? = null  // Home "Resume" deep-link: scroll here once its header appears
+    private var inSearchMode = false               // SearchView expanded → show prompt, not the gallery
+    private var launchedForSearch = false          // opened from Home's Search card → back exits to Home
+    private var pendingOpenSearch = false          // Home "Search" card: expand search once the menu exists
+    private var pendingShowStats = false           // Home "Hidden & stats" card: show stats once loaded
 
     // Jump toggle: remembers the two positions so the swap FAB can bounce back and forth
     private var jumpAMonthKey: String? = null  // where we came FROM
@@ -128,7 +132,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
-        binding.toolbar.setOnClickListener { showSortPopup() }
+        binding.btnSort.setOnClickListener { showSortPopup() }
         // When opened from the Home hub, show an Up arrow back to it (consistent with the
         // other spokes like Duplicates). Once Home becomes the launcher this is always true.
         if (intent.getBooleanExtra(HomeActivity.EXTRA_FROM_HOME, false)) {
@@ -142,6 +146,9 @@ class MainActivity : AppCompatActivity() {
             pendingResumeKey = key
             viewModel.requestOpenAtMonth(key)
         }
+        pendingOpenSearch = intent.getBooleanExtra(HomeActivity.EXTRA_OPEN_SEARCH, false)
+        launchedForSearch = pendingOpenSearch   // came from Home's Search card → exit to Home on close
+        pendingShowStats  = intent.getBooleanExtra(HomeActivity.EXTRA_SHOW_STATS, false)
         // Pad the bottom bar and FAB so they clear the gesture/nav-button bar on Android 15+
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val navBar = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
@@ -381,6 +388,12 @@ class MainActivity : AppCompatActivity() {
      * settle point (load finished, prompt dismissed, returned from Settings).
      */
     private fun tryShowOnboarding() {
+        // The Home hub's hero ("Start curating" / "Continue curating") now teaches the concept,
+        // so the in-gallery onboarding dialog is retired. Kept as a no-op (call sites are
+        // harmless) to avoid churn; remove fully in a later cleanup.
+        if (true) return
+
+        @Suppress("UNREACHABLE_CODE")
         if (viewModel.prefs.hasSeenOnboarding()) return
         if (allFilesPromptActive) return                          // PDF-access decision still pending
         if (awaitingAutoRestore) return                           // auto-restore check / prompt pending
@@ -540,7 +553,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun observeViewModel() {
         viewModel.galleryItems.observe(this) { items ->
-            if (viewModel.searchResults.value != null) return@observe  // search results take priority
+            // Search takes over the list area — don't let a gallery refresh overwrite results/prompt
+            if (inSearchMode || viewModel.searchResults.value != null) return@observe
             adapter.submitList(items)
             val isLoading = viewModel.isLoading.value ?: false
             binding.tvEmpty.isVisible = items.isEmpty() && !isLoading
@@ -562,12 +576,17 @@ class MainActivity : AppCompatActivity() {
 
         viewModel.searchResults.observe(this) { results ->
             if (results == null) {
-                // Exiting search — restore gallery
-                binding.settingsBar.isVisible = true
-                updateRestoreLayoutVisibility()
-                binding.stickyHeader.visibility = android.view.View.GONE
-                viewModel.galleryItems.value?.let { adapter.submitList(it) }
-                binding.tvEmpty.isVisible = false
+                if (inSearchMode) {
+                    // Search bar still open, query cleared/empty → keep the prompt, not the gallery
+                    showSearchPrompt()
+                } else {
+                    // Exiting search — restore gallery
+                    binding.settingsBar.isVisible = true
+                    updateRestoreLayoutVisibility()
+                    binding.stickyHeader.visibility = android.view.View.GONE
+                    viewModel.galleryItems.value?.let { adapter.submitList(it) }
+                    binding.tvEmpty.isVisible = false
+                }
             } else {
                 // In search mode
                 binding.settingsBar.isVisible = false
@@ -662,6 +681,11 @@ class MainActivity : AppCompatActivity() {
 
         viewModel.mediaStats.observe(this) { stats ->
             if (stats == null) return@observe
+            // Home "Hidden & stats" card deep-link: show the stats dialog once stats are ready.
+            if (pendingShowStats) {
+                pendingShowStats = false
+                showStatsDialog()
+            }
             val totalPhotoBytes = stats.visiblePhotoBytes + stats.hiddenPhotoBytes
             val totalVideoBytes = stats.visibleVideoBytes + stats.hiddenVideoBytes
             val totalAudioBytes = stats.visibleAudioBytes + stats.hiddenAudioBytes
@@ -774,6 +798,11 @@ class MainActivity : AppCompatActivity() {
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.menu_main, menu)
         setupSearchView(menu)
+        // Home "Search" card deep-link: expand the search field now that the menu exists.
+        if (pendingOpenSearch) {
+            pendingOpenSearch = false
+            menu.findItem(R.id.action_search)?.expandActionView()
+        }
         return true
     }
 
@@ -797,31 +826,47 @@ class MainActivity : AppCompatActivity() {
 
         searchItem.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
             override fun onMenuItemActionExpand(item: MenuItem): Boolean {
-                // Hide the sort subtitle while searching to make room
+                inSearchMode = true
                 supportActionBar?.subtitle = null
+                showSearchPrompt()   // empty prompt until the user types — not the whole gallery
                 return true
             }
             override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
+                inSearchMode = false
+                // If we were opened from Home just to search, exit straight back to Home
+                // instead of revealing the gallery behind the search.
+                if (launchedForSearch) { finish(); return true }
                 viewModel.clearSearch()
-                // Restore sort subtitle
                 updateSortSubtitle()
                 return true
             }
         })
     }
 
+    /** Search bar open with no query yet: show a prompt instead of the full gallery. */
+    private fun showSearchPrompt() {
+        binding.settingsBar.isVisible = false
+        binding.restoreLayout.isVisible = false
+        binding.stickyHeader.visibility = android.view.View.GONE
+        adapter.submitList(emptyList())
+        binding.tvEmpty.isVisible = true
+        binding.tvEmpty.text = "Type to search photos, videos, PDFs…"
+    }
+
+    // Sort is shown in the sort chip now; the toolbar subtitle is reserved for indexing/hashing
+    // progress. This updates the chip label and clears the subtitle when no progress is running.
     private fun updateSortSubtitle() {
-        // Don't overwrite while PDF indexing or photo hashing progress is being shown
+        binding.btnSort.text = when (viewModel.sortMode.value ?: SortMode.DATE_OLDEST) {
+            SortMode.DATE_NEWEST       -> "Newest first"
+            SortMode.DATE_OLDEST       -> "Oldest first"
+            SortMode.SIZE_ABSOLUTE     -> "Largest (overall)"
+            SortMode.SIZE_WITHIN_MONTH -> "Largest (per month)"
+            SortMode.COUNT_PER_MONTH   -> "Most items"
+        }
         val progress = viewModel.pdfIndexProgress.value
-        if (progress != null && progress.isActive) return
         val hashProgress = viewModel.photoHashProgress.value
-        if (hashProgress != null && hashProgress.isActive) return
-        supportActionBar?.subtitle = when (viewModel.sortMode.value ?: SortMode.DATE_OLDEST) {
-            SortMode.DATE_NEWEST       -> "Newest first ▾"
-            SortMode.DATE_OLDEST       -> "Oldest first ▾"
-            SortMode.SIZE_ABSOLUTE     -> "Largest first (overall) ▾"
-            SortMode.SIZE_WITHIN_MONTH -> "Largest first (per month) ▾"
-            SortMode.COUNT_PER_MONTH   -> "Most items first ▾"
+        if ((progress == null || !progress.isActive) && (hashProgress == null || !hashProgress.isActive)) {
+            supportActionBar?.subtitle = null
         }
     }
 
@@ -884,7 +929,6 @@ class MainActivity : AppCompatActivity() {
             true
         }
         R.id.action_help -> { showHelpDialog(); true }
-        R.id.action_stats_info -> { showStatsDialog(); true }
         R.id.action_share_diagnostics -> { shareDiagnostics(); true }
         else -> super.onOptionsItemSelected(item)
     }
@@ -921,7 +965,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSortPopup() {
-        val popup = androidx.appcompat.widget.PopupMenu(this, binding.toolbar)
+        val popup = androidx.appcompat.widget.PopupMenu(this, binding.btnSort)
         popup.menuInflater.inflate(R.menu.menu_sort, popup.menu)
         val checkedId = when (viewModel.sortMode.value ?: SortMode.DATE_OLDEST) {
             SortMode.DATE_NEWEST       -> R.id.sort_newest
@@ -1457,7 +1501,7 @@ In multi-select mode, tap Share to send the selected photos, videos, audio, or P
 Finds exact duplicate photos and videos (identical file content, even with different names). The app fingerprints your media in the background after PDF indexing completes — progress shows in the toolbar subtitle. Open Find Duplicates to review groups side by side: the best copy in each group (preferring your camera folder, then the oldest) is pre-selected to keep — tap a different copy to keep that one instead. Tap "Delete marked" to remove all the others and reclaim the space.
 
 🔢 SORT ORDER
-Tap the subtitle under "Media Curator" in the toolbar (e.g. "Oldest first ▾") to change the sort order:
+Tap the sort chip (e.g. "Oldest first") below the type cards to change the sort order:
 • Newest / Oldest first — by capture date
 • Largest first (overall) — biggest files first, across all months
 • Largest first (per month) — months ordered by their total size

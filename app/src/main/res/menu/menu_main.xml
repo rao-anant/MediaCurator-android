@@ -13,10 +13,6 @@
     <item android:id="@+id/action_refresh" android:title="Refresh"
         android:icon="@android:drawable/ic_menu_rotate"
         app:showAsAction="ifRoom" />
-    <item android:id="@+id/action_stats_info" android:title="Stats"
-        android:icon="@drawable/ic_info"
-        app:showAsAction="always"
-        app:iconTint="?attr/colorOnSurface" />
     <item android:id="@+id/action_pdf_content_search"
         android:title="PDF content search"
         android:checkable="true"
