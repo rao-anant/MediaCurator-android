@@ -11,4 +11,10 @@
         android:title="Refresh"
         android:icon="@android:drawable/ic_menu_rotate"
         app:showAsAction="always" />
+    <item android:id="@+id/action_help"
+        android:title="Help"
+        app:showAsAction="never" />
+    <item android:id="@+id/action_settings"
+        android:title="Settings"
+        app:showAsAction="never" />
 </menu>

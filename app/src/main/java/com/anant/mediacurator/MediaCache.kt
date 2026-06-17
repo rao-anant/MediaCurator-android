@@ -22,4 +22,7 @@ object MediaCache {
     /** Drop the cache so the next [get] refetches (call when the library changes). */
     @Synchronized
     fun invalidate() { cached = null }
+
+    /** Cached item count without triggering a scan (-1 if nothing cached yet). */
+    fun peekSize(): Int = cached?.size ?: -1
 }

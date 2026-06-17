@@ -77,6 +77,17 @@ class SearchActivity : AppCompatActivity() {
 
     override fun onSupportNavigateUp(): Boolean { finish(); return true }
 
+    override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_search, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean = when (item.itemId) {
+        R.id.action_help     -> { startActivity(Intent(this, HelpActivity::class.java)); true }
+        R.id.action_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
+        else -> super.onOptionsItemSelected(item)
+    }
+
     private fun openViewer(item: MediaItem) {
         if (item.type == MediaType.PDF) {
             val open = Intent(Intent.ACTION_VIEW).apply {

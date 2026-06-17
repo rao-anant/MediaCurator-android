@@ -231,6 +231,7 @@ class HomeActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
         R.id.action_home_stats -> { StatsDialog.present(this); true }
         R.id.action_home_help  -> { startActivity(Intent(this, HelpActivity::class.java)); true }
+        R.id.action_settings   -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
         else -> super.onOptionsItemSelected(item)
     }
 

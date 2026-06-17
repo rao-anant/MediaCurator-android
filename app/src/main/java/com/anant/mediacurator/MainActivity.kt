@@ -121,11 +121,6 @@ class MainActivity : AppCompatActivity() {
             tryShowOnboarding()
         }
 
-    private val importLauncher =
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            uri ?: return@registerForActivityResult
-            importHiddenMonths(uri)
-        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -874,11 +869,6 @@ class MainActivity : AppCompatActivity() {
         // Search now lives on the Home hub (dedicated SearchActivity) — hide the gallery lens.
         menu.findItem(R.id.action_search)?.isVisible = false
         menu.findItem(R.id.action_refresh)?.isVisible = !inSelection
-        
-        menu.findItem(R.id.action_pdf_content_search)?.let {
-            it.isVisible = !inSelection
-            it.isChecked = viewModel.isPdfContentSearchEnabled()
-        }
         return super.onPrepareOptionsMenu(menu)
     }
 
@@ -889,79 +879,13 @@ class MainActivity : AppCompatActivity() {
         R.id.sort_size_month    -> { viewModel.setSortMode(SortMode.SIZE_WITHIN_MONTH); true }
         R.id.sort_count_month   -> { viewModel.setSortMode(SortMode.COUNT_PER_MONTH);   true }
         R.id.action_refresh -> { viewModel.loadMedia(forceRefresh = true); true }
-        R.id.action_backup -> {
-            androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("Hidden months backup")
-                .setItems(arrayOf("Export to Downloads", "Import from file")) { _, which ->
-                    if (which == 0) exportHiddenMonths()
-                    else importLauncher.launch(arrayOf("application/json", "application/octet-stream", "*/*"))
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-            true
-        }
-        R.id.action_pdf_content_search -> {
-            val currentlyEnabled = viewModel.isPdfContentSearchEnabled()
-            if (currentlyEnabled) {
-                // Disabling — warn the user
-                androidx.appcompat.app.AlertDialog.Builder(this)
-                    .setTitle("Disable PDF content search?")
-                    .setMessage(
-                        "Background indexing will stop and PDF results will be matched " +
-                        "by filename only.\n\nThe existing index files are kept — " +
-                        "re-enabling will pick up where it left off."
-                    )
-                    .setPositiveButton("Disable") { _, _ ->
-                        viewModel.setPdfContentSearchEnabled(false)
-                        invalidateOptionsMenu()
-                        showToast("PDF content search disabled")
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-            } else {
-                viewModel.setPdfContentSearchEnabled(true)
-                invalidateOptionsMenu()
-                showToast("PDF content search enabled — indexing will resume")
-            }
-            true
-        }
         R.id.action_stats_info -> { StatsDialog.present(this); true }
         R.id.action_help -> { startActivity(Intent(this, HelpActivity::class.java)); true }
-        R.id.action_share_diagnostics -> { shareDiagnostics(); true }
+        R.id.action_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
         else -> super.onOptionsItemSelected(item)
     }
 
     /** Assemble device info + app state + the ring log, hand to a share sheet. */
-    private fun shareDiagnostics() {
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Share diagnostics?")
-            .setMessage(
-                "The report contains your device model, app settings, and a log of recent " +
-                "app activity (indexing results, errors). No photos or file contents are " +
-                "included. You can review the full text before sending."
-            )
-            .setPositiveButton("Continue") { _, _ -> doShareDiagnostics() }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun doShareDiagnostics() {
-        val state = mutableListOf<String>()
-        state += "All-files access : ${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) android.os.Environment.isExternalStorageManager() else "n/a"}"
-        state += "Hashes cached    : ${viewModel.photoHashStore.countEntries()}"
-        state += "PDF search       : ${viewModel.prefs.isPdfContentSearchEnabled()}"
-        state += "Dup detection    : ${viewModel.prefs.isPhotoDuplicateDetectionEnabled()}"
-        state += "Gallery items    : ${viewModel.galleryItems.value?.size ?: 0}"
-
-        val report = DebugLog.buildDiagnosticsReport(this, state)
-        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(android.content.Intent.EXTRA_SUBJECT, "Media Curator diagnostics")
-            putExtra(android.content.Intent.EXTRA_TEXT, report)
-        }
-        startActivity(android.content.Intent.createChooser(intent, "Share diagnostics via"))
-    }
-
     private fun showSortPopup() {
         val popup = androidx.appcompat.widget.PopupMenu(this, binding.btnSort)
         popup.menuInflater.inflate(R.menu.menu_sort, popup.menu)
@@ -1181,74 +1105,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Export / Import ───────────────────────────────────────────────────────
-
-    private fun exportHiddenMonths() {
-        val months = viewModel.prefs.getDoneMonths()
-        if (months.isEmpty()) {
-            showToast("No hidden months to export")
-            return
-        }
-        lifecycleScope.launch {
-            try {
-                val stamp    = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.US).format(Date())
-                val filename = "mediacurator_hidden_$stamp.json"
-                val json     = buildExportJson(months)
-
-                withContext(Dispatchers.IO) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        val values = ContentValues().apply {
-                            put(MediaStore.Downloads.DISPLAY_NAME, filename)
-                            put(MediaStore.Downloads.MIME_TYPE, "application/json")
-                            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                        }
-                        val uri = contentResolver.insert(
-                            MediaStore.Downloads.getContentUri("external"), values
-                        ) ?: throw Exception("Could not create file in Downloads")
-                        contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
-                    } else {
-                        @Suppress("DEPRECATION")
-                        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                        dir.mkdirs()
-                        File(dir, filename).writeText(json, Charsets.UTF_8)
-                    }
-                }
-                showToast("Exported ${months.size} hidden months → Downloads/$filename")
-            } catch (e: Exception) {
-                Log.e("MainActivity", "Export failed", e)
-                showToast("Export failed: ${e.message}")
-            }
-        }
-    }
-
-    private fun buildExportJson(months: Set<String>): String {
-        val ts = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date())
-        val arr = months.sorted().joinToString(",\n    ") { "\"$it\"" }
-        return "{\n  \"version\": 1,\n  \"exportedAt\": \"$ts\",\n  \"hiddenMonths\": [\n    $arr\n  ]\n}"
-    }
-
-    private fun importHiddenMonths(uri: Uri) {
-        lifecycleScope.launch {
-            try {
-                val json = withContext(Dispatchers.IO) {
-                    contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
-                } ?: run { showToast("Could not read file"); return@launch }
-
-                val obj      = org.json.JSONObject(json)
-                val arr      = obj.getJSONArray("hiddenMonths")
-                val incoming = (0 until arr.length()).map { arr.getString(it) }.toSet()
-
-                val existing = viewModel.prefs.getDoneMonths()
-                val newCount = (incoming - existing).size
-                viewModel.prefs.setDoneMonths(existing + incoming)
-                viewModel.loadMedia(forceRefresh = false)
-
-                showToast("Import done — $newCount new months added (${existing.size + newCount} total hidden)")
-            } catch (e: Exception) {
-                Log.e("MainActivity", "Import failed", e)
-                showToast("Import failed: ${e.message}")
-            }
-        }
-    }
 
     // ── Move to album ─────────────────────────────────────────────────────────
 

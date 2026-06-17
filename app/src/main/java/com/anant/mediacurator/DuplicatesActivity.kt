@@ -78,6 +78,14 @@ class DuplicatesActivity : AppCompatActivity() {
             StatsDialog.present(this)
             return true
         }
+        if (item.itemId == R.id.action_help) {
+            startActivity(android.content.Intent(this, HelpActivity::class.java))
+            return true
+        }
+        if (item.itemId == R.id.action_settings) {
+            startActivity(android.content.Intent(this, SettingsActivity::class.java))
+            return true
+        }
         return super.onOptionsItemSelected(item)
     }
 
