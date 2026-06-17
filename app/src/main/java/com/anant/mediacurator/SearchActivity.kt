@@ -97,7 +97,10 @@ class SearchActivity : AppCompatActivity() {
             try { startActivity(Intent.createChooser(open, "Open PDF with")) } catch (_: Exception) {}
             return
         }
+        // Page through the current result set, in result order.
+        val ids = (viewModel.results.value ?: emptyList()).map { it.mediaItem.id }.toLongArray()
         startActivity(Intent(this, MediaViewerActivity::class.java)
-            .putExtra(MediaViewerActivity.EXTRA_START_ID, item.id))
+            .putExtra(MediaViewerActivity.EXTRA_START_ID, item.id)
+            .putExtra(MediaViewerActivity.EXTRA_ID_LIST, ids))
     }
 }

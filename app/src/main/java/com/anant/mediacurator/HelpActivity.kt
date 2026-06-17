@@ -41,6 +41,8 @@ class HelpActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "How it works"
 
+        binding.tvVersion.text = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+
         features.forEach { f ->
             val card = ItemHelpCardBinding.inflate(layoutInflater, binding.helpContainer, false)
             card.ivIcon.setImageResource(f.icon)

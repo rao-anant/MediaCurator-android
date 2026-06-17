@@ -66,6 +66,9 @@ class MediaViewerActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_START_POSITION = "extra_start_position"
         const val EXTRA_START_ID = "extra_start_id"
+        // Optional explicit, ordered id list to page through (Gallery month / Search / Hidden).
+        // When absent, the viewer falls back to the full gallery list via loadMedia().
+        const val EXTRA_ID_LIST = "extra_id_list"
         // DEBUG: show item id + type + position on each viewer page. Flip to true to diagnose; ship false.
         const val DEBUG_OVERLAY = false
     }
@@ -232,7 +235,13 @@ class MediaViewerActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        viewModel.loadMedia()
+        val idList = intent.getLongArrayExtra(EXTRA_ID_LIST)
+        if (idList != null && idList.isNotEmpty()) {
+            // Page exactly the list the caller provided (month / search / hidden), by id.
+            viewModel.loadExplicit(idList)
+        } else {
+            viewModel.loadMedia()
+        }
     }
 
     private fun getCurrentViewHolder(): MediaPagerAdapter.ViewHolder? {

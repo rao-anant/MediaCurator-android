@@ -122,8 +122,11 @@ class HiddenActivity : AppCompatActivity() {
             try { startActivity(Intent.createChooser(open, "Open PDF with")) } catch (_: Exception) {}
             return
         }
+        // Page through exactly the items of the month currently shown.
+        val ids = (viewModel.shown.value?.items ?: emptyList()).map { it.mediaItem.id }.toLongArray()
         startActivity(Intent(this, MediaViewerActivity::class.java)
-            .putExtra(MediaViewerActivity.EXTRA_START_ID, item.id))
+            .putExtra(MediaViewerActivity.EXTRA_START_ID, item.id)
+            .putExtra(MediaViewerActivity.EXTRA_ID_LIST, ids))
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {

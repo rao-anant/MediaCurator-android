@@ -961,6 +961,28 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * Load an EXPLICIT, ordered set of items for [MediaViewerActivity] to swipe through,
+     * resolved by id from the shared [MediaCache] — independent of the gallery tree.
+     *
+     * The viewer has its OWN GalleryViewModel instance, so [setViewerItems] /
+     * [setSearchFlatItems] (which mutate the *gallery's* VM) can't reach it; the caller must
+     * pass the id list via the launch intent and the viewer calls this instead of [loadMedia].
+     * Without it, an item opened from Hidden/Search isn't in the tree-derived flat list, so
+     * lookup-by-id fails and the viewer falls back to position 0 (the wrong photo).
+     */
+    fun loadExplicit(ids: LongArray) {
+        viewModelScope.launch {
+            val items = withContext(Dispatchers.IO) {
+                val byId = MediaCache.get(repo).associateBy { it.id }
+                ids.mapNotNull { byId[it] }
+            }
+            galleryFlatItems = items
+            _isLoading.postValue(false)
+            _flatMediaItems.postValue(items)
+        }
+    }
+
+    /**
      * Point [flatMediaItems] at [items] so [MediaViewerActivity] swipes through
      * search results instead of the full gallery list.  Called from MainActivity
      * just before opening the viewer from a search result tap.

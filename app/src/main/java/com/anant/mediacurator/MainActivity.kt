@@ -300,29 +300,23 @@ class MainActivity : AppCompatActivity() {
                         showToast("No PDF viewer found")
                     }
                 } else {
-                    // If we're in search mode, point the viewer at the search result list
-                    // so it swipes through results rather than the full gallery.
-                    // Without this, items from hidden months won't be found by ID in
-                    // flatMediaItems and the viewer falls back to position 0 (wrong item).
+                    // Build the explicit, ordered id list the viewer pages through, passed via
+                    // the intent (the viewer has its own VM, so it can't read this one's flat
+                    // list). Without it, lookup-by-id can fail and the viewer falls back to
+                    // position 0 (the wrong photo).
                     val searchItems = viewModel.searchResults.value
-                    if (searchItems != null) {
-                        val mediaItems = searchItems
-                            .filterIsInstance<GalleryItem.Media>()
-                            .map { it.mediaItem }
-                        viewModel.setSearchFlatItems(mediaItems)
+                    val viewerIds: LongArray = if (searchItems != null) {
+                        searchItems.filterIsInstance<GalleryItem.Media>().map { it.mediaItem.id }
                     } else {
-                        // Confine the viewer to the tapped photo's month, in the grid's exact
-                        // rendered order.  Prev/Next then stays within that month and won't jump
-                        // into other (even adjacent, expanded) months.  In flat size-sorted mode
-                        // every Media has an empty monthKey, so this naturally spans the whole
-                        // list — matching that view, which shows everything in one sequence.
+                        // Confine to the tapped photo's month, in the grid's exact rendered order
+                        // (in flat size-sorted mode monthKey is empty, so this spans the whole list).
                         val rendered = adapter.currentList.filterIsInstance<GalleryItem.Media>()
                         val monthKey = rendered.firstOrNull { it.mediaItem.id == item.id }?.monthKey
-                        val monthItems = rendered.filter { it.monthKey == monthKey }.map { it.mediaItem }
-                        if (monthItems.isNotEmpty()) viewModel.setViewerItems(monthItems)
-                    }
+                        rendered.filter { it.monthKey == monthKey }.map { it.mediaItem.id }
+                    }.toLongArray()
                     val intent = Intent(this, MediaViewerActivity::class.java).apply {
                         putExtra(MediaViewerActivity.EXTRA_START_ID, item.id)
+                        putExtra(MediaViewerActivity.EXTRA_ID_LIST, viewerIds)
                     }
                     startActivity(intent)
                 }
