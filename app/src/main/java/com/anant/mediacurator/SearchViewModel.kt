@@ -12,8 +12,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Standalone search for the dedicated [SearchActivity]. Reuses [SearchEngine] over the
- * shared [MediaCache], on-device labels ([LabelCache]) and the PDF BM25 index — the same
- * inputs the gallery used, but independent of GalleryViewModel.
+ * shared [MediaCache] and the PDF BM25 index — file names + PDF content only.
  *
  * results == null  → no query yet (show the prompt)
  * results == []    → searched, nothing matched
@@ -23,11 +22,9 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo          = MediaRepository(app)
     private val prefs         = PreferencesManager(app)
-    private val labelCache    = LabelCache(app)
     private val pdfIndexStore = PdfIndexStore(app)
 
     private var media: List<MediaItem> = emptyList()
-    private var labels: Map<Long, Map<String, Float>> = emptyMap()
     private var bm25: PdfBm25Index? = null
     private var ready = false
 
@@ -42,7 +39,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         searchJob = viewModelScope.launch {
             ensureData()
             val res = withContext(Dispatchers.Default) {
-                SearchEngine.search(query, media, labels, bm25)
+                SearchEngine.search(query, media, bm25)
             }
             _results.postValue(res.mapIndexed { i, r ->
                 GalleryItem.Media(r.item, "", i, r.matchReason.ifBlank { null }, 0)
@@ -50,12 +47,11 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Load media/labels/index once, lazily, off the main thread. */
+    /** Load media + PDF index once, lazily, off the main thread. */
     private suspend fun ensureData() {
         if (ready) return
         withContext(Dispatchers.IO) {
             media  = MediaCache.get(repo)
-            labels = labelCache.loadAll()
             bm25   = if (prefs.isPdfContentSearchEnabled())
                          try { PdfBm25Index(pdfIndexStore.loadAll()) } catch (e: Exception) { null }
                      else null

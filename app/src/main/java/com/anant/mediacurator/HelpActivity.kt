@@ -27,7 +27,7 @@ class HelpActivity : AppCompatActivity() {
         Feature(R.drawable.ic_info, "Stats anywhere",
             "Tap the ⓘ icon on any screen for counts and sizes per type, plus your lifetime Cleaned Up total — items deleted and space freed."),
         Feature(R.drawable.ic_lock, "Private by design",
-            "Everything runs on your device — labels, search and PDF text are all computed locally. No internet, no accounts, no ads.")
+            "Everything runs on your device — search and PDF text are all computed locally. No internet, no accounts, no ads.")
     )
 
     private lateinit var binding: ActivityHelpBinding

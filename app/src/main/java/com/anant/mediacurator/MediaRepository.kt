@@ -10,9 +10,6 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.label.ImageLabeling
-import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
@@ -725,69 +722,6 @@ class MediaRepository(private val context: Context) {
             }
         }
         return result
-    }
-
-    // ── Image labeling ────────────────────────────────────────────────────────
-
-    /**
-     * Lazy ML Kit labeler — created once and reused for the entire ViewModel lifetime.
-     * Caller is responsible for calling [closeLabeler] in ViewModel.onCleared().
-     *
-     * Uses the bundled on-device model (no internet, no Play Services dependency).
-     * Default confidence threshold is 0.5; we filter client-side to ≥ 0.65 to keep
-     * only high-quality labels.
-     */
-    private val imageLabeler by lazy {
-        ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS)
-    }
-
-    /**
-     * Run on-device image labeling on a single IMAGE-type [MediaItem].
-     *
-     * Returns up to [maxLabels] labels with confidence ≥ [minConfidence], sorted by
-     * confidence descending.  Returns an empty list for non-image items or on any error
-     * (permission issue, corrupt file, etc.) — callers can safely ignore failures.
-     *
-     * Designed to be called from a background coroutine (IO dispatcher).
-     */
-    /**
-     * Returns a label→confidence map for [item], e.g. {"Dog": 0.89, "Beach": 0.76}.
-     * Only labels with confidence ≥ [minConfidence] are included.
-     * Returns an empty map for non-image types or on any error.
-     */
-    suspend fun labelImage(
-        item: MediaItem,
-        minConfidence: Float = 0.50f,
-        maxLabels: Int = 8
-    ): Map<String, Float> {
-        if (item.type != MediaType.IMAGE) return emptyMap()
-        return try {
-            val uri   = Uri.parse(item.uri)
-            val image = InputImage.fromFilePath(context, uri)
-            suspendCancellableCoroutine { cont ->
-                imageLabeler.process(image)
-                    .addOnSuccessListener { results ->
-                        val labels = results
-                            .filter { it.confidence >= minConfidence }
-                            .sortedByDescending { it.confidence }
-                            .take(maxLabels)
-                            .associate { it.text to it.confidence }
-                        cont.resume(labels)
-                    }
-                    .addOnFailureListener { e ->
-                        Log.w("MediaRepository", "labelImage failed: ${item.displayName}", e)
-                        cont.resume(emptyMap())
-                    }
-            }
-        } catch (e: Exception) {
-            Log.w("MediaRepository", "labelImage exception: ${item.displayName}", e)
-            emptyMap()
-        }
-    }
-
-    /** Release the ML Kit labeler. Call from ViewModel.onCleared(). */
-    fun closeLabeler() {
-        try { imageLabeler.close() } catch (_: Exception) {}
     }
 
     // ── PDF word extraction for BM25 index ───────────────────────────────────

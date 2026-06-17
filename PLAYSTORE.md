@@ -8,7 +8,7 @@
 | Keystore file | `mediacurator.keystore` (gitignored — keep a backup!) |
 | Keystore alias | `mediacurator` |
 | Passwords | In `keystore.properties` (gitignored) |
-| Privacy policy URL | `https://rao-anant.github.io/MediaCurator/privacy-policy.html` |
+| Privacy policy URL | `https://rao-anant.github.io/MediaCurator-android/privacy-policy.html` |
 
 > ⚠️ The keystore file and passwords are gitignored. Back them up to an external drive or
 > cloud storage. Losing the keystore means you can never push an update to this app on Play Store.
@@ -16,7 +16,7 @@
 ---
 
 ## GitHub Pages — enable the privacy policy URL
-1. Go to https://github.com/rao-anant/MediaCurator
+1. Go to https://github.com/rao-anant/MediaCurator-android
 2. Settings → Pages → Source: **Deploy from a branch**
 3. Branch: `main` · Folder: `/docs`
 4. Save → wait ~2 min → verify at the URL above
@@ -47,57 +47,68 @@ Turbocharge curating your photos, videos and PDFs, and enjoy the time reclaimed.
 
 ## Store listing — Full description
 ```
-Media Curator helps you take control of your photo library — without any cloud, accounts,
-or privacy trade-offs. Everything runs locally on your device.
+Media Curator — clean up years of photos, videos & PDFs. Private, fast, and surprisingly fun!
 
-THE PROBLEM WITH EVERY OTHER GALLERY APP
-Most gallery and file manager apps let you delete what you don't want — but they offer no
-way to track your progress. Come back a week later and you're back to square one, slogging
-through months you've already reviewed. Media Curator solves this: mark a month as done
-and it stays out of your way. Next session, you pick up exactly where you left off.
-That's the difference — what used to drag across many interrupted sessions
-now moves multiple times faster.
+Take control of a media library that's grown for years — no cloud, no accounts, no privacy
+trade-offs. Everything runs 100% on your phone.
 
-Note: deleted items are permanently removed from the phone, but hidden months
-are never deleted — you can unhide them back into the app at any time.
-Hidden items remain fully accessible in your phone's default Gallery app.
+✨ BUILT TO DECLUTTER BETTER AND FASTER — NOT JUST BROWSE
+Your gallery is great for browsing memories — pinch, scroll, relive. But it never remembers
+what you've already sorted through, so cleaning up means wading past the same items over
+and over.
 
-BROWSE YOUR LIBRARY YOUR WAY
-• See all your photos, videos, and PDFs grouped by month and year
-• Filter to show only photos, only videos, or only PDFs at a glance
-• Sort by newest, oldest, or largest file first
-• "Largest First" flat view instantly surfaces your biggest files so you can free up space fast
+Never scroll past the same thousands of photos again. Media Curator finishes the job:
+review a month, mark it hidden, and it steps out of your way — next time you pick up exactly
+where you left off. What used to drag across endless interrupted sessions now moves many
+times faster.
 
-CURATE WITH CONFIDENCE
-• Swipe through items in a full-screen viewer
-• Long-press to select multiple items, then delete them all at once
-• The combined size of selected items is shown before you confirm — no surprises
-• Mark months as "done" once you've reviewed them, so you can track your progress
+And it's not just photos and videos — Media Curator brings your audio files and PDFs into
+the same timeline, which your gallery app simply doesn't do.
 
-FIND STORAGE HOGS INSTANTLY
-• File size is shown on every thumbnail
-• Video duration is shown alongside file size
-• Sort by largest file to see exactly what's eating your storage
+Hidden months are never deleted. They stay fully available in your phone's normal gallery,
+and you can unhide them anytime. Only items you explicitly delete are removed. Best of all,
+hiding keeps reviewed items out of your way, so curation stays fast and even fun.
 
-PDF SUPPORT
-• Browse PDFs stored in Downloads, Documents, and other accessible folders
-• View, select, and delete PDFs alongside your photos and videos
+🗂️ BROWSE YOUR WAY
+• Photos, videos, audio, and PDFs grouped by year and month
+• One tap to show just photos, videos, audio, or PDFs
+• Sort by newest, oldest, or largest first
+• "Largest first" surfaces your biggest files instantly
 
-PRIVACY FIRST
-• No internet connection — ever
-• No accounts, no sign-in
-• No analytics, no ads, no crash-reporting SDKs
+✅ CURATE WITH CONFIDENCE
+• Full-screen swipe-through viewer
+• Long-press to multi-select, then delete, share, or move in one go
+• Selection size shown before you confirm — no surprises
+• Mark months done and watch your progress add up
+
+🧹 RECLAIM SPACE
+• File size on every thumbnail; duration on videos and audio
+• Sort by largest to see exactly what's eating your storage
+• Spot exact duplicate photos and videos, review them side by side, and reclaim the space
+
+🔍 SEARCH
+• Search by filename, with fuzzy matching that forgives typos ("flwoer" still finds "flower")
+• Search inside your PDFs — find a document by a word on one of its pages
+
+📄 PDF SUPPORT
+• Browse, view, and delete PDFs alongside your media
+• Searchable by content, not just filename
+
+🔒 PRIVACY FIRST
+• No internet access — ever. No accounts, no sign-in
+• No ads, no analytics, no third-party tracking or crash-reporting SDKs
 • Your media never leaves your device
-• The only file the app writes is a small local backup (mediacurator_hidden.json) that
-  remembers which months you've marked as reviewed — no photos, no personal data
+• The app writes only small local helper files (your reviewed-months list and the PDF and
+  duplicate search indexes) — never your photos or any personal data
 
-PERMISSIONS EXPLAINED
-• Photos/Videos access: to display your library
-• All files access (Android 11+): to browse PDF files in Downloads and Documents folders
+🔑 PERMISSIONS
+• Photos / Videos / Audio: to display your library
+• All files access (Android 11+): to find and manage PDF files in Downloads, Documents,
+  and other folders
 
-Perfect for anyone who wants to periodically clean up their camera roll, free up storage
-space, or keep track of which months they've already reviewed — without handing their
-photos to a third-party service.
+Perfect for anyone who wants to periodically clean up their camera roll, reclaim storage,
+and methodically work through years of media — without ever handing their photos to a
+third party.
 ```
 
 ---

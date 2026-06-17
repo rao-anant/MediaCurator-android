@@ -120,18 +120,6 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private val _autoRestoreCheckDone = MutableLiveData<Unit>()
     val autoRestoreCheckDone: LiveData<Unit> = _autoRestoreCheckDone
 
-    // ── Image labels ──────────────────────────────────────────────────────────
-    // Map of MediaItem.id → list of ML Kit label strings (e.g. ["Beach","Sky"]).
-    // Populated lazily in the background after each media load; surviving labels from
-    // the LabelCache are merged in immediately on first load so the UI shows them
-    // without waiting for the labeler to finish.
-    // Map of MediaItem.id → (label → confidence), e.g. {42L: {"Dog": 0.89, "Beach": 0.76}}
-    private val _photoLabels = MutableLiveData<Map<Long, Map<String, Float>>>(emptyMap())
-    val photoLabels: LiveData<Map<Long, Map<String, Float>>> = _photoLabels
-
-    val labelCache = LabelCache(app)
-    private var labelingJob: Job? = null
-
     val pdfIndexStore = PdfIndexStore(app)
     private var pdfIndexingJob: Job? = null
 
@@ -582,7 +570,6 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 val videos = filteredMedia.filter { it.type == MediaType.VIDEO }
                 val pdfs   = filteredMedia.filter { it.type == MediaType.PDF }
                 withContext(Dispatchers.Main) {
-                    startLabelingInBackground(images)
                     // Photos AND videos are hashed for duplicate detection; PDF indexing runs first.
                     startPdfIndexingInBackground(pdfs, images + videos)
                 }
@@ -917,7 +904,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     // ── Search ────────────────────────────────────────────────────────────────
 
     /**
-     * Run a fuzzy search across ML labels and filenames for [query].
+     * Run a fuzzy search across filenames and PDF content for [query].
      * Results are posted to [searchResults]; the gallery stays hidden while
      * results is non-null.  Cancels any in-flight search before starting a new one.
      */
@@ -927,7 +914,6 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
         searchJob = viewModelScope.launch {
             val allMedia = cachedRawMedia ?: return@launch
-            val labels   = _photoLabels.value ?: emptyMap()
 
             // Build/reuse the BM25 index (loads from ~N small files the first time).
             // Skip entirely when PDF content search is disabled by the user.
@@ -938,7 +924,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             val results = withContext(Dispatchers.Default) {
-                SearchEngine.search(query, allMedia, labels, bm25)
+                SearchEngine.search(query, allMedia, bm25)
             }
 
             // Mark results that belong to hidden (done) months so the user knows a hit
@@ -1016,50 +1002,6 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         searchJob?.cancel()
         _searchResults.value = null
         _flatMediaItems.value = galleryFlatItems  // restore gallery swipe list
-    }
-
-    // ── Labeling pipeline ─────────────────────────────────────────────────────
-
-    /**
-     * Kick off background labeling for any IMAGE items that aren't yet in the cache.
-     *
-     * Strategy:
-     *  1. Merge currently-cached labels into [_photoLabels] immediately (zero-latency
-     *     for items the user has seen before).
-     *  2. Collect unlabeled image IDs and run ML Kit inference on them in batches of 10,
-     *     posting incremental updates to [_photoLabels] as each batch finishes.
-     *
-     * The job is cancelled and restarted whenever a new media load runs, so stale
-     * labeling work from a previous load never stomps on fresh results.
-     */
-    fun startLabelingInBackground(images: List<MediaItem>) {
-        labelingJob?.cancel()
-        labelingJob = viewModelScope.launch(Dispatchers.IO) {
-            // 1. Seed LiveData with whatever is already cached
-            val cached = labelCache.loadAll().toMutableMap()
-            if (cached.isNotEmpty()) _photoLabels.postValue(cached.toMap())
-
-            // 2. Identify images we haven't labeled yet
-            val unlabeled = images.filter { it.type == MediaType.IMAGE && !labelCache.hasEntry(it.id) }
-            if (unlabeled.isEmpty()) return@launch
-
-            Log.d("GalleryViewModel", "Labeling ${unlabeled.size} new images in background")
-
-            // 3. Process in batches of 10; yield between batches to stay responsive
-            val BATCH = 10
-            for (batch in unlabeled.chunked(BATCH)) {
-                if (!isActive) break
-                for (item in batch) {
-                    if (!isActive) break
-                    val labels = repo.labelImage(item)   // now Map<String, Float>
-                    labelCache.saveLabels(item.id, labels)
-                    if (labels.isNotEmpty()) cached[item.id] = labels
-                }
-                _photoLabels.postValue(cached.toMap())
-                kotlinx.coroutines.delay(50)
-            }
-            Log.d("GalleryViewModel", "Labeling complete. ${cached.size} images labeled.")
-        }
     }
 
     /**
@@ -1721,9 +1663,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         super.onCleared()
-        labelingJob?.cancel()
         pdfIndexingJob?.cancel()
-        repo.closeLabeler()
         mediaObserver?.let {
             getApplication<Application>().contentResolver.unregisterContentObserver(it)
         }

@@ -1,13 +1,15 @@
 package com.anant.mediacurator
 
 /**
- * Fuzzy search over ML labels, filenames, and PDF content (BM25).
+ * Fuzzy search over filenames and PDF content (BM25).
+ *
+ * (On-device ML image labeling was removed — its generic labels were too noisy,
+ * tagging unrelated images, and the feature was not advertised.)
  *
  * Algorithm
  * ---------
  * 1. Tokenise the query into words.
  * 2. For each media item, score it against every query token:
- *    - **Label search** : each ML label is matched against the token.
  *    - **Filename search** : the base-name (no extension) is split on
  *      non-alphanumeric characters; each part is matched against the token.
  *    - **PDF content search**: the BM25 inverted index is looked up for
@@ -16,8 +18,7 @@ package com.anant.mediacurator
  *    distance, which counts transpositions as a single edit — so "flwoer"
  *    (transposed 'w'/'o') is 1 edit away from "flower" and matches.
  * 4. An item passes if *every* query token has at least one match ≥ threshold,
- *    ensuring multi-word queries like "dog beach" only return photos tagged
- *    with both concepts.
+ *    ensuring multi-word queries only return items matching both terms.
  *
  * Edit-distance budget by token length
  * -------------------------------------
@@ -47,13 +48,10 @@ object SearchEngine {
     /**
      * Minimum effective score for a result to be included.
      *
-     * Effective score = fuzzyMatchScore × mlConfidence (for label hits)
-     *                 = fuzzyMatchScore             (for filename hits)
-     *                 = 0.75f (fixed)               (for PDF content hits)
+     * Effective score = fuzzyMatchScore  (for filename hits)
+     *                 = 0.75f (fixed)    (for PDF content hits)
      *
      * Examples at this threshold (0.65):
-     *   "Dog" label at 0.89 conf  → 1.0 × 0.89 = 0.89  ✓ included
-     *   "Sunglasses" at 0.51 conf → 1.0 × 0.51 = 0.51  ✗ excluded  ← the glasses fix
      *   filename exact match      → 1.0          = 1.0  ✓ included
      *   filename fuzzy 1-edit     → 0.70          = 0.70 ✓ included
      *   PDF content match         → 0.75 (fixed)  = 0.75 ✓ included
@@ -71,7 +69,6 @@ object SearchEngine {
     fun search(
         query: String,
         allMedia: List<MediaItem>,
-        labels: Map<Long, Map<String, Float>>,
         bm25Index: PdfBm25Index? = null
     ): List<Result> {
         val tokens = tokenise(query)
@@ -85,10 +82,8 @@ object SearchEngine {
         val results = mutableListOf<Result>()
 
         for (item in allMedia) {
-            val itemLabels = labels[item.id] ?: emptyMap()   // label → confidence
             val fileTokens = filenameTokens(item.displayName)
 
-            val matchedLabels    = mutableListOf<String>()
             val matchedFileparts = mutableListOf<String>()
             var totalScore       = 0f
             var allTokensMatched = true
@@ -96,14 +91,7 @@ object SearchEngine {
 
             for (token in tokens) {
                 var bestScore    = 0f
-                var bestLabel    = ""
                 var bestFilePart = ""
-
-                // --- label candidates: weight by ML Kit confidence ---
-                for ((label, confidence) in itemLabels) {
-                    val s = fuzzyScore(token, label) * confidence
-                    if (s > bestScore) { bestScore = s; bestLabel = label; bestFilePart = "" }
-                }
 
                 // --- filename token candidates: no confidence weight ---
                 // Skip purely-numeric query tokens for photos/videos — they match the long
@@ -114,7 +102,7 @@ object SearchEngine {
                 if (item.type == MediaType.PDF || !numericToken) {
                     for (part in fileTokens) {
                         val s = fuzzyScore(token, part)
-                        if (s > bestScore) { bestScore = s; bestLabel = ""; bestFilePart = part }
+                        if (s > bestScore) { bestScore = s; bestFilePart = part }
                     }
                 }
 
@@ -125,7 +113,6 @@ object SearchEngine {
                     if (bm25Component > 0f) {
                         // Term present in the BM25 index for this PDF → content match
                         bestScore    = 0.75f   // passes MIN_SCORE; final rank from pdfBm25Total
-                        bestLabel    = ""
                         bestFilePart = ""
                         pdfBm25Total += bm25Component
                     }
@@ -135,22 +122,21 @@ object SearchEngine {
                 if (bestScore < MIN_SCORE) { allTokensMatched = false; break }
 
                 totalScore += bestScore
-                if (bestLabel.isNotEmpty())         matchedLabels.add(bestLabel)
-                else if (bestFilePart.isNotEmpty()) matchedFileparts.add(bestFilePart)
+                if (bestFilePart.isNotEmpty()) matchedFileparts.add(bestFilePart)
             }
 
             if (!allTokensMatched) continue
 
             // Use normalised BM25 total as the score for pure content matches so that
             // PDFs with more / rarer term occurrences rank above weaker matches.
-            val avgScore = if (pdfBm25Total > 0f && matchedLabels.isEmpty() && matchedFileparts.isEmpty()) {
+            val avgScore = if (pdfBm25Total > 0f && matchedFileparts.isEmpty()) {
                 minOf(pdfBm25Total / (tokens.size * BM25_SCORE_SCALE), 1.0f)
             } else {
                 totalScore / tokens.size
             }
 
             val pdfContentMatch = pdfBm25Total > 0f
-            val reason = buildReason(matchedLabels, matchedFileparts, item.displayName, pdfContentMatch)
+            val reason = buildReason(matchedFileparts, item.displayName, pdfContentMatch)
             results.add(Result(item, reason, avgScore))
         }
 
@@ -256,16 +242,11 @@ object SearchEngine {
     }
 
     private fun buildReason(
-        labels: List<String>,
         fileParts: List<String>,
         fullFilename: String,
         pdfContentMatch: Boolean = false
     ): String {
         return when {
-            labels.isNotEmpty() && fileParts.isNotEmpty() ->
-                labels.distinct().take(2).joinToString(" · ") + " · 📄"
-            labels.isNotEmpty() ->
-                labels.distinct().take(3).joinToString(" · ")
             fileParts.isNotEmpty() ->
                 "≈ ${fullFilename.substringBeforeLast('.').take(20)}"
             pdfContentMatch ->
