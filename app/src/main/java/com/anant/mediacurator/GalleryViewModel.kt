@@ -1809,6 +1809,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
      */
     internal fun checkAndAutoRestore() {
         if (prefs.getDoneMonths().isNotEmpty()) return  // prefs already populated — nothing to do
+        if (prefs.wasHiddenRestoreOffered()) return      // Home already offered the restore up front
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val app      = getApplication<Application>()

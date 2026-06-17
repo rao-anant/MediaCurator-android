@@ -96,6 +96,18 @@ class PreferencesManager(context: Context) {
         prefs.edit().putBoolean(KEY_PHOTO_DUPLICATE_DETECTION, enabled).apply()
     }
 
+    /** True once the All-files-access rationale has been shown (so we ask only once, up front). */
+    fun wasAllFilesPromptShown(): Boolean = prefs.getBoolean(KEY_ALL_FILES_PROMPT_SHOWN, false)
+    fun setAllFilesPromptShown() {
+        prefs.edit().putBoolean(KEY_ALL_FILES_PROMPT_SHOWN, true).apply()
+    }
+
+    /** True once we've offered to restore the hidden-months backup (prevents a second prompt). */
+    fun wasHiddenRestoreOffered(): Boolean = prefs.getBoolean(KEY_HIDDEN_RESTORE_OFFERED, false)
+    fun setHiddenRestoreOffered() {
+        prefs.edit().putBoolean(KEY_HIDDEN_RESTORE_OFFERED, true).apply()
+    }
+
     /** First-run onboarding: true once the user has seen the "how curation works" intro. */
     fun hasSeenOnboarding(): Boolean = prefs.getBoolean(KEY_SEEN_ONBOARDING, false)
     fun setSeenOnboarding() {
@@ -122,5 +134,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_PDF_CONTENT_SEARCH        = "pdf_content_search"
         private const val KEY_PHOTO_DUPLICATE_DETECTION = "photo_duplicate_detection"
         private const val KEY_SEEN_ONBOARDING           = "seen_onboarding"
+        private const val KEY_ALL_FILES_PROMPT_SHOWN    = "all_files_prompt_shown"
+        private const val KEY_HIDDEN_RESTORE_OFFERED     = "hidden_restore_offered"
     }
 }

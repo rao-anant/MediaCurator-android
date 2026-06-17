@@ -1033,6 +1033,7 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
             && !hasAllFilesPermission()
             && !offeredAllFilesAccess
+            && !viewModel.prefs.wasAllFilesPromptShown()   // Home already asked up front
         ) {
             offeredAllFilesAccess = true
             allFilesPromptActive = true   // block onboarding until this decision is made

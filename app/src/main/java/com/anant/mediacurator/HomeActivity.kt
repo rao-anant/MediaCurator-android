@@ -3,13 +3,16 @@ package com.anant.mediacurator
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.view.Menu
 import android.view.MenuItem
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
@@ -29,12 +32,26 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var binding: ActivityHomeBinding
     private val viewModel: HomeViewModel by viewModels()
 
-    // Home is the launcher now, so it owns the media-permission request. The gallery's own
-    // bootstrap (all-files prompt, auto-restore, background indexing/hashing) still runs when
-    // the gallery opens — which is the immediate next step in the curation flow.
+    private val prefs by lazy { PreferencesManager(this) }
+
+    // Guards so the per-onStart bootstrap does its file work at most once per session.
+    private var launchedAllFilesSettings = false
+    private var restoreChecked = false
+
+    // Home is the launcher, so it owns BOTH permission requests: the READ_MEDIA gate below,
+    // and (up front) the All-files-access prompt that the gallery used to ask lazily. Asking
+    // here means the hidden-months list and Cleaned-up counter restore from Downloads BEFORE
+    // the gallery is opened, so Home's stats are correct immediately after a reinstall.
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { viewModel.load() }
+    ) { viewModel.load(); bootstrapStorage() }
+
+    private val allFilesLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        launchedAllFilesSettings = false
+        runRestores()   // permission decided — restore stats + hidden months with file access
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,9 +84,86 @@ class HomeActivity : AppCompatActivity() {
         super.onStart()
         if (hasMediaPermissions()) {
             viewModel.load()   // refresh on return (e.g. after hiding months / deleting)
+            bootstrapStorage()
         } else {
             permissionLauncher.launch(requiredPermissions())
         }
+    }
+
+    /**
+     * Up-front storage bootstrap (runs once media permission is granted):
+     *  1. On Android 11+ without All-files access, show the rationale ONCE and send the user
+     *     to Settings. PDFs and cross-reinstall restore both need this permission.
+     *  2. Either way, restore the lifetime Cleaned-up counter and the hidden-months list from
+     *     their Downloads backups, so Home's stats are correct before the gallery is opened.
+     */
+    private fun bootstrapStorage() {
+        val needsAllFiles = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                !Environment.isExternalStorageManager()
+        if (needsAllFiles && !prefs.wasAllFilesPromptShown()) {
+            prefs.setAllFilesPromptShown()
+            showAllFilesRationale()
+        } else {
+            runRestores()
+        }
+    }
+
+    private fun showAllFilesRationale() {
+        AlertDialog.Builder(this)
+            .setTitle("Allow file access")
+            .setMessage(
+                "Media Curator works best with \"All files access\". It lets the app:\n\n" +
+                "•  show your PDF files\n" +
+                "•  keep your curation progress and Curated history across reinstalls\n\n" +
+                "Nothing is ever uploaded — everything stays on your device."
+            )
+            .setPositiveButton("Allow") { _, _ ->
+                launchedAllFilesSettings = true
+                allFilesLauncher.launch(
+                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                )
+            }
+            .setNegativeButton("Not now", null)
+            // Fires for Not-now / back / outside-tap. Allow also dismisses, but then the
+            // Settings screen is handling it — allFilesLauncher runs the restore on return.
+            .setOnDismissListener {
+                if (!launchedAllFilesSettings) runRestores()
+            }
+            .show()
+    }
+
+    /** Restore the deletion counter (sync, internally guarded) and the hidden-months list. */
+    private fun runRestores() {
+        DeletionStatsStore.getInstance(this).ensureRestored()
+        if (restoreChecked) return
+        restoreChecked = true
+        // Only look for a hidden-months backup if we haven't already offered, and there are
+        // no hidden months locally (fresh install / reinstall). Read off the main thread.
+        if (prefs.wasHiddenRestoreOffered() || prefs.getDoneMonths().isNotEmpty()) return
+        Thread {
+            val months = HiddenMonthsBackup.read(this)
+            if (months != null) runOnUiThread { offerHiddenRestore(months) }
+        }.start()
+    }
+
+    private fun offerHiddenRestore(months: Set<String>) {
+        if (isFinishing || isDestroyed) return
+        if (prefs.getDoneMonths().isNotEmpty()) return   // raced with the gallery — already restored
+        prefs.setHiddenRestoreOffered()
+        AlertDialog.Builder(this)
+            .setTitle("Restore your progress?")
+            .setMessage(
+                "Found a saved list of ${months.size} hidden month${if (months.size > 1) "s" else ""} " +
+                "from a previous install. Hide them again so you can pick up where you left off?"
+            )
+            .setPositiveButton("Restore") { _, _ ->
+                prefs.setDoneMonths(months)
+                viewModel.load()   // recompute reviewed / hidden counts
+            }
+            .setNegativeButton("Not now", null)
+            .show()
     }
 
     private fun requiredPermissions(): Array<String> =
