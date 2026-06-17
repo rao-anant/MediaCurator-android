@@ -4,7 +4,9 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.viewModels
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.GridLayoutManager
@@ -25,6 +27,7 @@ class HiddenActivity : AppCompatActivity() {
 
     private var yearList: List<Int> = emptyList()
     private var monthsInSelectedYear: List<MonthGroup> = emptyList()
+    private var selectedYear: Int? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,22 +47,55 @@ class HiddenActivity : AppCompatActivity() {
 
         binding.autoYear.setOnItemClickListener { _, _, position, _ ->
             val year = yearList.getOrNull(position) ?: return@setOnItemClickListener
+            selectedYear = year
             populateMonths(year)
             binding.autoMonth.setText("", false)
             binding.autoMonth.showDropDown()
         }
         binding.autoMonth.setOnItemClickListener { _, _, position, _ ->
             val group = monthsInSelectedYear.getOrNull(position) ?: return@setOnItemClickListener
-            viewModel.selectMonth(group.year, group.month)
-            // Reset the pickers — the chosen month is now unhidden and shown below.
-            binding.autoYear.setText("", false)
-            binding.autoMonth.setText("", false)
-            monthsInSelectedYear = emptyList()
+            val cur = viewModel.shown.value
+            if (cur != null && cur.year == group.year && cur.month == group.month) {
+                binding.autoMonth.setText("", false); return@setOnItemClickListener   // already showing it
+            }
+            // Switching to another month: confirm the current one first (it was unhidden the
+            // moment they picked it), so a forgotten "Hide again" doesn't silently lose it.
+            confirmShownThen {
+                viewModel.selectMonth(group.year, group.month)
+                // Keep the year selected; renderPickers refreshes its month list (minus this
+                // one). Just clear the month field so it's ready for the next pick.
+                binding.autoMonth.setText("", false)
+            }
         }
         binding.btnHideAgain.setOnClickListener { viewModel.hideShown() }
 
         viewModel.hiddenMonths.observe(this) { groups -> renderPickers(groups) }
         viewModel.shown.observe(this) { renderShown(it) }
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = attemptExit()
+        })
+    }
+
+    /** Leaving the screen while a just-unhidden month is on display → confirm intent first. */
+    private fun attemptExit() = confirmShownThen { finish() }
+
+    /**
+     * If a month is currently shown (it was unhidden the moment it was picked) and not yet
+     * re-hidden, ask whether to hide it again or keep it unhidden, THEN run [onResolved].
+     * Defaults to "Hide again" so a forgotten re-hide doesn't quietly undo their curation.
+     * Dismissing the dialog (back / outside tap) cancels — [onResolved] does not run.
+     * No prompt when nothing is shown.
+     */
+    private fun confirmShownThen(onResolved: () -> Unit) {
+        val s = viewModel.shown.value
+        if (s == null) { onResolved(); return }
+        AlertDialog.Builder(this)
+            .setTitle("Keep \"${s.label}\" unhidden?")
+            .setMessage("You unhid it but didn't hide it again. Hide it again to keep it curated, or keep it unhidden in your gallery.")
+            .setPositiveButton("Hide again") { _, _ -> viewModel.hideShown(); onResolved() }
+            .setNegativeButton("Keep unhidden") { _, _ -> onResolved() }
+            .show()
     }
 
     override fun onStart() {
@@ -67,12 +103,10 @@ class HiddenActivity : AppCompatActivity() {
         viewModel.load()
     }
 
-    override fun onSupportNavigateUp(): Boolean { finish(); return true }
+    override fun onSupportNavigateUp(): Boolean { attemptExit(); return true }
 
     private fun renderPickers(groups: List<MonthGroup>) {
-        val hasHidden = groups.isNotEmpty()
-        binding.menuYear.isEnabled = hasHidden
-        binding.menuMonth.isEnabled = hasHidden
+        binding.menuYear.isEnabled = groups.isNotEmpty()
 
         yearList = groups.map { it.year }.distinct().sortedDescending()
         // Show the total hidden items per year, e.g. "2022 (156)".
@@ -80,6 +114,21 @@ class HiddenActivity : AppCompatActivity() {
         binding.autoYear.setSimpleItems(
             yearList.map { y -> "$y (${countByYear[y] ?: 0})" }.toTypedArray()
         )
+
+        // Preserve the chosen year across reloads so the user can keep picking months from it;
+        // refresh its month list (the just-unhidden one is now gone). Drop it if the year has
+        // no hidden months left.
+        val sel = selectedYear
+        if (sel != null && sel in yearList) {
+            binding.autoYear.setText("$sel (${countByYear[sel] ?: 0})", false)
+            populateMonths(sel)
+        } else {
+            selectedYear = null
+            binding.autoYear.setText("", false)
+            binding.autoMonth.setText("", false)
+            monthsInSelectedYear = emptyList()
+            binding.menuMonth.isEnabled = false
+        }
 
         renderShown(viewModel.shown.value)   // refresh empty-state wording
     }

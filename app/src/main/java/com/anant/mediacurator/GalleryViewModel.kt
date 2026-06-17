@@ -208,6 +208,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private var cachedRawMedia: List<MediaItem>? = null
     // Saved copy of the last gallery flat list so clearSearch() can restore it
     private var galleryFlatItems: List<MediaItem> = emptyList()
+
+    // True in MediaViewerActivity's VM when it pages an EXPLICIT id list (loadExplicit). In this
+    // mode, loadMedia() reloads must NOT clobber the flat list with the full gallery tree — that
+    // would desync the ViewPager position and make delete act on the wrong item.
+    private var explicitViewerMode = false
     private var structuralVersion = 0
 
     // Items deleted during this session — NEVER cleared while the app is running.
@@ -813,6 +818,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
         _deletionCompletedEvent.postValue(true)
 
+        // The viewer pages a fixed explicit list — the filter above already dropped the deleted
+        // item. Skip the gallery's progressive reloads here; they'd overwrite the explicit list
+        // with the full tree and desync the pager (deleting the wrong item on the next tap).
+        if (explicitViewerMode) return
+
         viewModelScope.launch {
             // Progressive refreshes to sync with MediaStore.
             // sessionDeletedFingerprints guarantees items never reappear in this session
@@ -971,10 +981,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
      * lookup-by-id fails and the viewer falls back to position 0 (the wrong photo).
      */
     fun loadExplicit(ids: LongArray) {
+        explicitViewerMode = true
         viewModelScope.launch {
-            val items = withContext(Dispatchers.IO) {
+            val items: List<MediaItem> = withContext(Dispatchers.IO) {
                 val byId = MediaCache.get(repo).associateBy { it.id }
-                ids.mapNotNull { byId[it] }
+                ids.toList().mapNotNull { id -> byId[id] }
             }
             galleryFlatItems = items
             _isLoading.postValue(false)

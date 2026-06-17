@@ -94,8 +94,6 @@ PRIVACY FIRST
 PERMISSIONS EXPLAINED
 • Photos/Videos access: to display your library
 • All files access (Android 11+): to browse PDF files in Downloads and Documents folders
-• Optional "One-Click Delete" (MANAGE_MEDIA on Android 12+): skip the per-operation
-  confirmation dialog when deleting media. Enable/disable in the app menu at any time.
 
 Perfect for anyone who wants to periodically clean up their camera roll, free up storage
 space, or keep track of which months they've already reviewed — without handing their
