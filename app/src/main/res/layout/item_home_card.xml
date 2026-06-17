@@ -13,12 +13,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="13dp">
+        android:padding="18dp">
 
         <ImageView
             android:id="@+id/ivCardIcon"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
             app:tint="@color/on_surface_variant"
             android:contentDescription="@null" />
 
@@ -26,9 +26,9 @@
             android:id="@+id/tvCardTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="12dp"
             android:textColor="@color/on_surface"
-            android:textSize="14sp"
+            android:textSize="15sp"
             android:textStyle="bold" />
 
         <TextView

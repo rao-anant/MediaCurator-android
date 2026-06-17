@@ -35,5 +35,9 @@
             android:configChanges="orientation|screenSize" />
         <activity android:name=".DuplicatesActivity" android:exported="false"
             android:parentActivityName=".HomeActivity" />
+        <activity android:name=".SearchActivity" android:exported="false"
+            android:parentActivityName=".HomeActivity" />
+        <activity android:name=".HelpActivity" android:exported="false"
+            android:parentActivityName=".HomeActivity" />
     </application>
 </manifest>

@@ -681,10 +681,9 @@ class MainActivity : AppCompatActivity() {
 
         viewModel.mediaStats.observe(this) { stats ->
             if (stats == null) return@observe
-            // Home "Hidden & stats" card deep-link: show the stats dialog once stats are ready.
             if (pendingShowStats) {
                 pendingShowStats = false
-                showStatsDialog()
+                StatsDialog.present(this)
             }
             val totalPhotoBytes = stats.visiblePhotoBytes + stats.hiddenPhotoBytes
             val totalVideoBytes = stats.visibleVideoBytes + stats.hiddenVideoBytes
@@ -872,6 +871,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
         val inSelection = adapter.selectionMode
+        // Search now lives on the Home hub (dedicated SearchActivity) — hide the gallery lens.
+        menu.findItem(R.id.action_search)?.isVisible = false
         menu.findItem(R.id.action_refresh)?.isVisible = !inSelection
         
         menu.findItem(R.id.action_pdf_content_search)?.let {
@@ -924,11 +925,8 @@ class MainActivity : AppCompatActivity() {
             }
             true
         }
-        R.id.action_find_duplicates -> {
-            startActivity(android.content.Intent(this, DuplicatesActivity::class.java))
-            true
-        }
-        R.id.action_help -> { showHelpDialog(); true }
+        R.id.action_stats_info -> { StatsDialog.present(this); true }
+        R.id.action_help -> { startActivity(Intent(this, HelpActivity::class.java)); true }
         R.id.action_share_diagnostics -> { shareDiagnostics(); true }
         else -> super.onOptionsItemSelected(item)
     }
@@ -1105,62 +1103,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         return "No media found on this device."
-    }
-
-    private fun showStatsDialog() {
-        val s = viewModel.mediaStats.value
-        if (s == null) { showToast("Stats not loaded yet"); return }
-
-        fun row(label: String, vis: Int, hid: Int, tot: Int) =
-            "%-8s %5d + %5d = %5d".format(label, vis, hid, tot)
-        fun rowB(label: String, vb: Long, hb: Long) =
-            "%-8s %s + %s = %s".format(label, fmtBytes(vb), fmtBytes(hb), fmtBytes(vb + hb))
-
-        val vAll = s.visiblePhotos + s.visibleVideos + s.visibleAudios + s.visiblePdfs
-        val hAll = s.hiddenPhotos  + s.hiddenVideos  + s.hiddenAudios  + s.hiddenPdfs
-        val tAll = s.totalPhotos   + s.totalVideos   + s.totalAudios   + s.totalPdfs
-        val vbAll = s.visiblePhotoBytes + s.visibleVideoBytes + s.visibleAudioBytes + s.visiblePdfBytes
-        val hbAll = s.hiddenPhotoBytes  + s.hiddenVideoBytes  + s.hiddenAudioBytes  + s.hiddenPdfBytes
-
-        val msg = buildString {
-            appendLine("COUNTS  (visible + hidden = total)")
-            appendLine(row("Photos",  s.visiblePhotos, s.hiddenPhotos, s.totalPhotos))
-            appendLine(row("Videos",  s.visibleVideos, s.hiddenVideos, s.totalVideos))
-            if (s.totalAudios > 0)
-                appendLine(row("Audio",   s.visibleAudios, s.hiddenAudios, s.totalAudios))
-            if (s.totalPdfs > 0)
-                appendLine(row("PDFs",    s.visiblePdfs,   s.hiddenPdfs,   s.totalPdfs))
-            appendLine(row("All",     vAll, hAll, tAll))
-            appendLine()
-            appendLine("SIZES   (visible + hidden = total)")
-            appendLine(rowB("Photos",  s.visiblePhotoBytes, s.hiddenPhotoBytes))
-            appendLine(rowB("Videos",  s.visibleVideoBytes, s.hiddenVideoBytes))
-            if (s.totalAudios > 0)
-                appendLine(rowB("Audio",   s.visibleAudioBytes, s.hiddenAudioBytes))
-            if (s.totalPdfs > 0)
-                appendLine(rowB("PDFs",    s.visiblePdfBytes,   s.hiddenPdfBytes))
-            appendLine(rowB("All",     vbAll, hbAll))
-            appendLine()
-            val ds = DeletionStatsStore.getInstance(this@MainActivity)
-            appendLine("CLEANED UP (lifetime)")
-            appendLine("Deleted   %,d items".format(ds.deletedCount))
-            appendLine("Freed     %s".format(fmtBytes(ds.deletedBytes)))
-            appendLine()
-            append(s.integrityDetail)
-        }
-
-        val tv = android.widget.TextView(this).apply {
-            text = msg
-            typeface = android.graphics.Typeface.MONOSPACE
-            textSize = 12f
-            setPadding(48, 32, 48, 16)
-        }
-
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Media Stats")
-            .setView(android.widget.ScrollView(this).apply { addView(tv) })
-            .setPositiveButton("OK", null)
-            .show()
     }
 
     // ── Sticky header ─────────────────────────────────────────────────────────

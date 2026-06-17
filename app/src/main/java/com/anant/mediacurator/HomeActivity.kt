@@ -52,10 +52,10 @@ class HomeActivity : AppCompatActivity() {
             startActivity(Intent(this, DuplicatesActivity::class.java))
         }
         bindCard(binding.cardSearch, R.drawable.ic_home_search, "Search", "Name, content, PDF text") {
-            openGallery(openSearch = true)   // interim; Stage 4 → dedicated SearchActivity
+            startActivity(Intent(this, SearchActivity::class.java))
         }
-        bindCard(binding.cardHidden, R.drawable.ic_home_hidden, "Hidden & stats", "…") {
-            openGallery(showStats = true)    // gallery hosts the unhide UI + stats dialog
+        bindCard(binding.cardHidden, R.drawable.ic_home_hidden, "Hidden months", "…") {
+            openGallery()    // gallery hosts the unhide UI; stats is separate now
         }
 
         viewModel.state.observe(this) { s -> currentState = s; render(s) }
@@ -135,7 +135,8 @@ class HomeActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.action_home_help -> { Toast.makeText(this, "Help (coming soon)", Toast.LENGTH_SHORT).show(); true }
+        R.id.action_home_stats -> { StatsDialog.present(this); true }
+        R.id.action_home_help  -> { startActivity(Intent(this, HelpActivity::class.java)); true }
         else -> super.onOptionsItemSelected(item)
     }
 

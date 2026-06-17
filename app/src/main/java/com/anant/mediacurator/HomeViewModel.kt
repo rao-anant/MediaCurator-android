@@ -74,7 +74,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
         val pct = if (totalMonths > 0) doneMonths * 100 / totalMonths else 0
 
-        var title = "Continue curating"; var progress = pct; var progressLabel = "$pct% overall"
+        var title = "Continue curating"; var progress = pct; var progressLabel = "$pct% curated"
         var caption = "Pick up at"; var resumeLabel = monthLabel(resumeKey); var button = "Resume"
 
         when {

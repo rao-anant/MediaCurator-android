@@ -55,6 +55,7 @@ class DeletionStatsStore private constructor(context: Context) {
             .putLong(KEY_COUNT, deletedCount + count)
             .putLong(KEY_BYTES, deletedBytes + bytes.coerceAtLeast(0L))
             .apply()
+        DebugLog.i("stats", "record +$count items, +${bytes}B -> total ${deletedCount} items / ${deletedBytes}B")
         io.execute { writeBackup() }   // mirror to Downloads off the main thread
     }
 

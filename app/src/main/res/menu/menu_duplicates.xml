@@ -2,6 +2,11 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
+        android:id="@+id/action_dupes_stats"
+        android:title="Stats"
+        android:icon="@drawable/ic_info"
+        app:showAsAction="always" />
+    <item
         android:id="@+id/action_refresh_dupes"
         android:title="Refresh"
         android:icon="@android:drawable/ic_menu_rotate"

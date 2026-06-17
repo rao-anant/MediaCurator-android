@@ -4,6 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
+    android:fitsSystemWindows="true"
     android:background="@color/background">
 
     <com.google.android.material.appbar.MaterialToolbar
@@ -131,12 +132,14 @@
                         </LinearLayout>
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnHeroAction"
-                            style="@style/Widget.Material3.Button.TonalButton"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="Resume"
+                            android:textColor="@android:color/white"
                             app:icon="@drawable/ic_home_curate"
-                            app:iconSize="18dp" />
+                            app:iconSize="18dp"
+                            app:iconTint="@android:color/white"
+                            app:backgroundTint="@color/check_green" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

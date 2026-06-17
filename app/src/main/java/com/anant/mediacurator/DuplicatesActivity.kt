@@ -42,19 +42,10 @@ class DuplicatesActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Let our layout draw edge-to-edge; we'll apply insets manually.
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-
         binding = ActivityDuplicatesBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        // Apply system bar insets so content isn't hidden behind status bar or nav bar.
-        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
-            val bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
-            binding.toolbar.updatePadding(top = bars.top)
-            binding.bottomBar.updatePadding(bottom = bars.bottom)
-            WindowInsetsCompat.CONSUMED
-        }
+        // Insets handled by android:fitsSystemWindows on the root (toolbar below the status
+        // bar, bottom bar above the nav bar) — consistent with Home/Search/Gallery.
 
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
@@ -81,6 +72,10 @@ class DuplicatesActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         if (item.itemId == R.id.action_refresh_dupes) {
             viewModel.loadDuplicates()
+            return true
+        }
+        if (item.itemId == R.id.action_dupes_stats) {
+            StatsDialog.present(this)
             return true
         }
         return super.onOptionsItemSelected(item)
@@ -136,13 +131,14 @@ class DuplicatesActivity : AppCompatActivity() {
         val toDeleteCount = groups.sumOf { g -> g.items.size - 1 }
         val reclaimable   = groups.sumOf { it.reclaimableBytes }
 
+        // No duplicates → hide the whole action bar (the centre empty-state says it all).
         if (toDeleteCount == 0) {
-            binding.tvStats.text = "No duplicates"
-            binding.btnDelete.isEnabled = false
-        } else {
-            binding.tvStats.text = "$toDeleteCount to delete · ${Formatter.formatShortFileSize(this, reclaimable)} reclaimable"
-            binding.btnDelete.isEnabled = true
+            binding.bottomBar.isVisible = false
+            return
         }
+        binding.bottomBar.isVisible = true
+        binding.tvStats.text = "$toDeleteCount to delete · ${Formatter.formatShortFileSize(this, reclaimable)} reclaimable"
+        binding.btnDelete.isEnabled = true
 
         binding.btnDelete.setOnClickListener {
             val count  = groups.sumOf { it.items.size - 1 }
