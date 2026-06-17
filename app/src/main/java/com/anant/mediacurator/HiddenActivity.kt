@@ -75,7 +75,11 @@ class HiddenActivity : AppCompatActivity() {
         binding.menuMonth.isEnabled = hasHidden
 
         yearList = groups.map { it.year }.distinct().sortedDescending()
-        binding.autoYear.setSimpleItems(yearList.map { it.toString() }.toTypedArray())
+        // Show the total hidden items per year, e.g. "2022 (156)".
+        val countByYear = groups.groupBy { it.year }.mapValues { (_, g) -> g.sumOf { it.items.size } }
+        binding.autoYear.setSimpleItems(
+            yearList.map { y -> "$y (${countByYear[y] ?: 0})" }.toTypedArray()
+        )
 
         renderShown(viewModel.shown.value)   // refresh empty-state wording
     }

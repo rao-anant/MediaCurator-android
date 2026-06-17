@@ -114,7 +114,7 @@ class HomeActivity : AppCompatActivity() {
             .setMessage(
                 "Media Curator works best with \"All files access\". It lets the app:\n\n" +
                 "•  show your PDF files\n" +
-                "•  keep your curation progress and Curated history across reinstalls\n\n" +
+                "•  keep your curation progress and history across reinstalls\n\n" +
                 "Nothing is ever uploaded — everything stays on your device."
             )
             .setPositiveButton("Allow") { _, _ ->

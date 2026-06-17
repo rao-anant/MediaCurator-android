@@ -53,7 +53,7 @@ class SearchActivity : AppCompatActivity() {
             when {
                 res == null -> {                       // no query yet → prompt
                     adapter.submitList(emptyList())
-                    binding.tvEmpty.text = "Search file names, photo labels (dog, beach…),\nand text inside PDFs"
+                    binding.tvEmpty.text = "Search file names\nand text inside PDFs"
                     binding.tvEmpty.isVisible = true
                 }
                 res.isEmpty() -> {                     // searched, nothing matched

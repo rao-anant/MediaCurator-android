@@ -21,7 +21,7 @@ class HelpActivity : AppCompatActivity() {
         Feature(R.drawable.ic_home_duplicate, "Find duplicates",
             "Finds exact duplicate photos and videos so you can delete the copies and reclaim space. The best copy in each group is pre-selected to keep."),
         Feature(R.drawable.ic_home_search, "Search",
-            "Find items by file name, photo labels (dog, beach, car…), or text inside PDFs. Typos are handled, and multi-word queries match all terms."),
+            "Find items by file name or text inside PDFs. Typos are handled, and multi-word queries match all terms."),
         Feature(R.drawable.ic_check, "Select & act",
             "Long-press any item to start selecting, tap more to add them, then Share, Move, or Delete the selection. Press Back to cancel."),
         Feature(R.drawable.ic_info, "Stats anywhere",

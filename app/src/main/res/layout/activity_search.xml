@@ -25,7 +25,7 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 app:iconifiedByDefault="false"
-                app:queryHint="File names, labels, PDF text…" />
+                app:queryHint="File names, PDF text…" />
 
             <ImageButton
                 android:id="@+id/btnStats"
@@ -57,6 +57,6 @@
             android:gravity="center"
             android:textColor="@color/on_surface_variant"
             android:textSize="15sp"
-            android:text="Search file names, photo labels (dog, beach…),\nand text inside PDFs" />
+            android:text="Search file names\nand text inside PDFs" />
     </FrameLayout>
 </LinearLayout>
