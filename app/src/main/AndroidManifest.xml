@@ -41,5 +41,7 @@
             android:parentActivityName=".HomeActivity" />
         <activity android:name=".SettingsActivity" android:exported="false"
             android:parentActivityName=".HomeActivity" />
+        <activity android:name=".HiddenActivity" android:exported="false"
+            android:parentActivityName=".HomeActivity" />
     </application>
 </manifest>

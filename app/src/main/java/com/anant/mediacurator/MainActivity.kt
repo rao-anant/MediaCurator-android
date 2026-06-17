@@ -156,7 +156,6 @@ class MainActivity : AppCompatActivity() {
         }
         setupRecyclerView()
         setupSelectionBar()
-        setupRestoreSpinners()
         setupFilterChips()
         setupScrollToTop()
         observeViewModel()
@@ -461,91 +460,6 @@ class MainActivity : AppCompatActivity() {
         invalidateOptionsMenu()
     }
 
-    private fun setupRestoreSpinners() {
-        binding.autoCompleteYear.setOnItemClickListener { parent, _, position, _ ->
-            val selectedItem = parent.getItemAtPosition(position) as String
-            val year = selectedItem.substringBefore(" ").trim()
-            updateMonthsDropdown(year)
-            binding.autoCompleteMonth.setText("", false)
-            binding.autoCompleteMonth.showDropDown()
-        }
-
-        binding.autoCompleteMonth.setOnItemClickListener { parent, _, position, _ ->
-            val abbr = (parent.getItemAtPosition(position) as String).substringBefore(" (")
-            val yearStr = binding.autoCompleteYear.text.toString().substringBefore(" ").trim()
-            val year = yearStr.toIntOrNull() ?: return@setOnItemClickListener
-
-            val groups = viewModel.doneMonthsAvailable.value ?: emptyList()
-            val group = groups.find { it.year == year && it.label.startsWith(abbr) }
-            group?.let {
-                viewModel.restoreMonth(it.year, it.month)
-                binding.autoCompleteMonth.setText("", false)
-            }
-        }
-    }
-
-    private fun updateMonthsDropdown(year: String) {
-        val groups = viewModel.doneMonthsAvailable.value ?: emptyList()
-        val monthsInYear = groups.filter { it.year.toString() == year }
-        
-        if (monthsInYear.isEmpty()) {
-            binding.menuMonth.isEnabled = false
-        } else {
-            binding.menuMonth.isEnabled = true
-            binding.menuMonth.isVisible = true
-            val abbrs = monthsInYear.map { it.label.split(" ")[0].take(3) }
-            val stats = monthsInYear.map { group ->
-                val size = fmtBytes(group.items.sumOf { it.size }).replace(" ", "")
-                "${group.items.size} / $size"
-            }
-            val monthAdapter = object : android.widget.ArrayAdapter<String>(
-                this@MainActivity, android.R.layout.simple_dropdown_item_1line, abbrs
-            ) {
-                // MaterialAutoCompleteTextView wraps this adapter and routes
-                // dropdown item creation through getView(), not getDropDownView().
-                override fun getView(
-                    position: Int,
-                    convertView: android.view.View?,
-                    parent: android.view.ViewGroup
-                ): android.view.View {
-                    val ctx = parent.context
-                    // Resolve text colours from the current theme so this works
-                    // on both dark and light themes.
-                    val ta = ctx.theme.obtainStyledAttributes(
-                        intArrayOf(android.R.attr.textColorPrimary, android.R.attr.textColorSecondary)
-                    )
-                    val colorPrimary   = ta.getColor(0, android.graphics.Color.WHITE)
-                    val colorSecondary = ta.getColor(1, 0xFFAAAAAA.toInt())
-                    ta.recycle()
-
-                    val ll = android.widget.LinearLayout(ctx).apply {
-                        orientation = android.widget.LinearLayout.VERTICAL
-                        setPadding(48, 24, 48, 24)
-                    }
-                    ll.addView(android.widget.TextView(ctx).apply {
-                        text = abbrs[position]
-                        textSize = 16f
-                        setTextColor(colorPrimary)
-                    })
-                    ll.addView(android.widget.TextView(ctx).apply {
-                        text = stats[position]
-                        textSize = 13f
-                        setTextColor(colorSecondary)
-                    })
-                    return ll
-                }
-            }
-            binding.autoCompleteMonth.setAdapter(monthAdapter)
-        }
-    }
-
-    /** Show the Unhide panel only when there are hidden months AND the tree view is active. */
-    private fun updateRestoreLayoutVisibility() {
-        val hasHidden  = (viewModel.doneMonthsAvailable.value?.isNotEmpty()) == true
-        val isTreeMode = viewModel.sortMode.value != SortMode.SIZE_ABSOLUTE
-        binding.restoreLayout.isVisible = hasHidden && isTreeMode
-    }
-
     private fun observeViewModel() {
         viewModel.galleryItems.observe(this) { items ->
             // Search takes over the list area — don't let a gallery refresh overwrite results/prompt
@@ -577,7 +491,6 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     // Exiting search — restore gallery
                     binding.settingsBar.isVisible = true
-                    updateRestoreLayoutVisibility()
                     binding.stickyHeader.visibility = android.view.View.GONE
                     viewModel.galleryItems.value?.let { adapter.submitList(it) }
                     binding.tvEmpty.isVisible = false
@@ -585,7 +498,6 @@ class MainActivity : AppCompatActivity() {
             } else {
                 // In search mode
                 binding.settingsBar.isVisible = false
-                binding.restoreLayout.isVisible = false
                 binding.stickyHeader.visibility = android.view.View.GONE
                 adapter.submitList(results)
                 val isLoading = viewModel.isLoading.value ?: false
@@ -606,7 +518,6 @@ class MainActivity : AppCompatActivity() {
             invalidateOptionsMenu()
             // Don't overwrite the subtitle if the SearchView is currently expanded
             if (viewModel.searchResults.value == null) updateSortSubtitle()
-            updateRestoreLayoutVisibility()
         }
 
         viewModel.storageSavedEvent.observe(this) { bytes ->
@@ -626,35 +537,8 @@ class MainActivity : AppCompatActivity() {
                 deleteLauncher.launch(IntentSenderRequest.Builder(it).build())
             }
         }
-        
-        viewModel.doneMonthsAvailable.observe(this) { groups ->
-            if (groups.isEmpty()) {
-                binding.restoreLayout.isVisible = false
-            } else {
-                updateRestoreLayoutVisibility()
-
-                // Total hidden count
-                val totalHidden = groups.sumOf { it.items.size }
-                binding.tvHiddenTotal.text = "${fmtCount(totalHidden)} items hidden"
-
-                // Year items with per-year counts and sizes: "2023 (450 / 10 MB)"
-                val yearGroups = groups.groupBy { it.year }
-                val yearCountMap = yearGroups.mapValues { (_, months) -> months.sumOf { it.items.size } }
-                val yearSizeMap  = yearGroups.mapValues { (_, months) -> months.sumOf { g -> g.items.sumOf { it.size } } }
-                val yearItems = groups.map { it.year }.distinct().sortedDescending()
-                    .map { y -> "$y (${yearCountMap[y] ?: 0} / ${fmtBytes(yearSizeMap[y] ?: 0L)})" }
-                    .toTypedArray()
-                binding.autoCompleteYear.setSimpleItems(yearItems)
-
-                // Re-populate month dropdown if a year is already selected
-                val currentYear = binding.autoCompleteYear.text.toString().substringBefore(" ").trim()
-                if (currentYear.isNotEmpty()) {
-                    updateMonthsDropdown(currentYear)
-                } else {
-                    binding.menuMonth.isEnabled = false
-                }
-            }
-        }
+        // Unhiding now lives on the dedicated HiddenActivity (Home → "Hidden months"),
+        // so the gallery no longer hosts an unhide panel.
 
         viewModel.scrollToMonthKey.observe(this) { key ->
             if (key == null) return@observe
@@ -840,7 +724,6 @@ class MainActivity : AppCompatActivity() {
     /** Search bar open with no query yet: show a prompt instead of the full gallery. */
     private fun showSearchPrompt() {
         binding.settingsBar.isVisible = false
-        binding.restoreLayout.isVisible = false
         binding.stickyHeader.visibility = android.view.View.GONE
         adapter.submitList(emptyList())
         binding.tvEmpty.isVisible = true
@@ -1024,7 +907,7 @@ class MainActivity : AppCompatActivity() {
 
         val hasHiddenMonths = viewModel.doneMonthsAvailable.value?.isNotEmpty() == true
         if (hasHiddenMonths) {
-            return "All months are marked as done!\nUse the Unhide panel above to restore months."
+            return "All months are hidden!\nUse \"Hidden months\" on the Home screen to bring them back."
         }
 
         return "No media found on this device."

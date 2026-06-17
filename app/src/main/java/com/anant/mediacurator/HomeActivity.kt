@@ -72,7 +72,7 @@ class HomeActivity : AppCompatActivity() {
             startActivity(Intent(this, SearchActivity::class.java))
         }
         bindCard(binding.cardHidden, R.drawable.ic_home_hidden, "Hidden months", "…") {
-            openGallery()    // gallery hosts the unhide UI; stats is separate now
+            startActivity(Intent(this, HiddenActivity::class.java))
         }
 
         viewModel.state.observe(this) { s -> currentState = s; render(s) }
