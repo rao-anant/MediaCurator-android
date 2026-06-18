@@ -313,43 +313,50 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
+        android:orientation="vertical"
         android:background="@color/selection_bar"
         android:padding="12dp"
         android:elevation="8dp"
         android:visibility="gone">
         <TextView
             android:id="@+id/tvSelectionCount"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="16sp"
+            android:layout_marginBottom="8dp"
+            android:textSize="15sp"
             android:textStyle="bold"
             android:textColor="@color/on_surface"
             android:text="0 selected" />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnShareSelected"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Share"
-            android:layout_marginEnd="8dp" />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnMoveSelected"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Move"
-            android:layout_marginEnd="8dp" />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnDeleteSelected"
-            style="@style/Widget.Material3.Button"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Delete"
-            android:textColor="@android:color/white"
-            app:backgroundTint="@color/delete_red" />
+            android:orientation="horizontal">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnShareSelected"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:text="Share"
+                android:layout_marginEnd="8dp" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnMoveSelected"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:text="Switch Album"
+                android:layout_marginEnd="8dp" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnDeleteSelected"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:text="Delete"
+                android:textColor="@android:color/white"
+                app:backgroundTint="@color/delete_red" />
+        </LinearLayout>
     </LinearLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

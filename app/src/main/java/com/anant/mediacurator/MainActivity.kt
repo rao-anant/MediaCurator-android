@@ -92,7 +92,7 @@ class MainActivity : AppCompatActivity() {
                     withContext(Dispatchers.IO) { moveItemsDirect(items, path) }
                     showMoveToast(items.size, skipped, targetName)
                     clearPendingMove()
-                    exitSelectionMode()
+                    // Keep the selection (like Share) — non-destructive, lets the user keep going.
                     viewModel.loadMedia(forceRefresh = true)
                 }
             }
@@ -503,7 +503,10 @@ class MainActivity : AppCompatActivity() {
         }
         
         viewModel.isLoading.observe(this) { loading ->
-            binding.progressBar.isVisible = loading
+            // Only spin on a genuine first/empty load. Sort, filter, refresh and the post-delete
+            // background re-syncs all reload with data already on screen — showing the spinner
+            // then would just flash it repeatedly as the view changes.
+            binding.progressBar.isVisible = loading && adapter.currentList.isEmpty()
             if (loading) binding.tvEmpty.isVisible = false  // never show empty state while loading
             if (!loading) tryShowOnboarding()               // app is ready — maybe show first-run intro
         }
@@ -991,7 +994,7 @@ class MainActivity : AppCompatActivity() {
             if (albums.isEmpty()) { showToast("No albums found"); return@launch }
             val names = albums.keys.toTypedArray()
             androidx.appcompat.app.AlertDialog.Builder(this@MainActivity)
-                .setTitle("Move to album")
+                .setTitle("Switch Album")
                 .setItems(names) { _, which ->
                     val targetName = names[which]
                     val targetPath = albums[targetName] ?: return@setItems
@@ -1052,7 +1055,6 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) { moveItemsDirect(toMove, targetPath) }
                 showMoveToast(toMove.size, skipped, targetName)
                 clearPendingMove()
-                exitSelectionMode()
                 viewModel.loadMedia(forceRefresh = true)
             }
         }
@@ -1073,9 +1075,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun showMoveToast(moved: Int, skipped: Int, targetName: String) {
         val msg = if (skipped > 0)
-            "Moved $moved · $skipped already in $targetName"
+            "Switched $moved · $skipped already in $targetName"
         else
-            "Moved $moved item${if (moved == 1) "" else "s"} to $targetName"
+            "Switched $moved item${if (moved == 1) "" else "s"} to $targetName"
         showToast(msg)
     }
 

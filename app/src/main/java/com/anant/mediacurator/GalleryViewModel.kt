@@ -329,6 +329,10 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun loadMedia(forceRefresh: Boolean = false) {
+        // In explicit-list mode (MediaViewerActivity, HiddenActivity) the flat list is driven
+        // by loadExplicit(); a tree rebuild here — including the 3s content-observer refresh —
+        // would clobber that list and desync the screen. Ignore it.
+        if (explicitViewerMode) return
         val sortMode = _sortMode.value ?: SortMode.DATE_OLDEST
         val photoOn = _includePhoto.value ?: true
         val videoOn = _includeVideo.value ?: true
