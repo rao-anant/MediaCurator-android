@@ -8,6 +8,7 @@
         body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #333; }
         h1 { color: #111; }
         h2 { margin-top: 2em; color: #222; }
+        code { background: #f4f4f4; padding: 1px 4px; border-radius: 3px; }
     </style>
 </head>
 <body>
@@ -15,22 +16,22 @@
 <h1>Privacy Policy</h1>
 <p><strong>App:</strong> Media Curator<br>
 <strong>Developer:</strong> Anant Rao<br>
-<strong>Last updated:</strong> May 2025</p>
+<strong>Last updated:</strong> June 2026</p>
 
 <h2>Overview</h2>
-<p>Media Curator is a local media management app. It helps you browse, curate, and delete photos, videos, and PDFs stored on your device. <strong>No data ever leaves your device.</strong> The app has no servers, no accounts, no analytics, and no internet connection.</p>
+<p>Media Curator is a local media management app. It helps you browse, curate, and delete photos, videos, audio files, and PDFs stored on your device. <strong>No data ever leaves your device.</strong> The app has no servers, no accounts, no analytics, and no internet connection.</p>
 
 <h2>What the app accesses</h2>
 <ul>
-    <li><strong>Photos and videos</strong> — read from your device's MediaStore to display thumbnails and allow deletion.</li>
+    <li><strong>Photos, videos, and audio</strong> — read from your device's MediaStore to display thumbnails and allow curation/deletion.</li>
     <li><strong>PDF files</strong> — read from publicly accessible storage locations (Downloads, Documents, etc.) to display and allow deletion.</li>
-    <li><strong>Downloads folder (write)</strong> — used solely to save and restore a local backup file (<code>mediacurator_hidden.json</code>) that records which months you have marked as done. This file stays on your device.</li>
+    <li><strong>Downloads folder (write)</strong> — used solely to save small local backup and index files (see <em>Data storage</em> below). These files stay on your device.</li>
 </ul>
 
 <h2>What the app does NOT do</h2>
 <ul>
     <li>Does not collect any personal data.</li>
-    <li>Does not transmit any data over the internet.</li>
+    <li>Does not transmit any data over the internet (the app has no internet permission and no network code).</li>
     <li>Does not use analytics, advertising, or crash-reporting SDKs.</li>
     <li>Does not access your contacts, location, microphone, or camera.</li>
     <li>Does not share any data with third parties.</li>
@@ -38,15 +39,27 @@
 
 <h2>Permissions explained</h2>
 <ul>
-    <li><strong>READ_MEDIA_IMAGES / READ_MEDIA_VIDEO</strong> — required to display your photos and videos.</li>
+    <li><strong>READ_MEDIA_IMAGES / READ_MEDIA_VIDEO / READ_MEDIA_AUDIO</strong> — required to display your photos, videos, and audio files.</li>
     <li><strong>READ_EXTERNAL_STORAGE</strong> — used on Android 12 and below for the same purpose.</li>
-    <li><strong>WRITE_EXTERNAL_STORAGE</strong> — used on Android 9 and below to save the backup file.</li>
-    <li><strong>MANAGE_MEDIA</strong> — optional. When granted, allows deleting media without a confirmation dialog on each operation (Android 12+). You can enable or disable this in the app's menu.</li>
-    <li><strong>All files access (MANAGE_EXTERNAL_STORAGE)</strong> — required on Android 11+ to browse PDF files stored in Downloads, Documents, and other shared folders. Android's granular media permissions (READ_MEDIA_IMAGES / READ_MEDIA_VIDEO) cover only photos and videos; there is no standard permission for reading PDFs across folders on Android 13+. Photos and videos work without this permission. The app does not use this permission to collect, upload, or share any data.</li>
+    <li><strong>WRITE_EXTERNAL_STORAGE</strong> — used on Android 9 and below to save the local backup/index files and to move items to the in-app recycle bin.</li>
+    <li><strong>All files access (MANAGE_EXTERNAL_STORAGE)</strong> — required on Android 11+ to browse and manage PDF files stored in Downloads, Documents, and other shared folders. Android's granular media permissions (READ_MEDIA_IMAGES / READ_MEDIA_VIDEO) cover only photos and videos; there is no standard permission for reading PDFs across folders on Android 13+. Photos, videos, and audio work without this permission. The app does not use this permission to collect, upload, or share any data.</li>
 </ul>
 
 <h2>Data storage</h2>
-<p>The only file the app writes is <code>mediacurator_hidden.json</code> in your Downloads folder. It contains a list of year-month keys you have marked as done (e.g. <code>"2023-04"</code>). It contains no photos, no personal information, and no device identifiers. You can delete it at any time.</p>
+<p>Everything the app writes stays on your device and contains <strong>no photos and no personal identifiers</strong>. To let your progress survive a reinstall, a few small files are saved in your Downloads folder:</p>
+<ul>
+    <li><code>mediacurator_hidden.json</code> — the list of year-month keys you have marked as done (e.g. <code>"2023-04"</code>).</li>
+    <li><code>mediacurator_stats.json</code> — running totals of how many items you have deleted and how much space that freed.</li>
+    <li><code>mediacurator_pdf_index.json.gz</code> — an offline search index of words extracted from your own PDFs, so you can search inside them. It contains text from your PDFs and is stored only on your device.</li>
+    <li><code>mediacurator_photo_hashes.txt.gz</code> — fingerprints (checksums) used to detect duplicate photos and videos.</li>
+</ul>
+<p>The app also keeps equivalent index files in its own private storage. You can delete the Downloads files at any time.</p>
+
+<h2>Deleting and the recycle bin</h2>
+<p>When you delete items, they are first moved to a recoverable <strong>Trash</strong> rather than removed immediately, so accidental deletions can be undone. On Android 11 and above this uses the system recycle bin (which auto-clears after about 30 days). On Android 10 and below the app keeps recoverable copies in its own private storage until you empty the Trash or 30 days pass. In all cases the files remain on your device — nothing is uploaded.</p>
+
+<h2>Diagnostics (optional)</h2>
+<p>The app can generate a diagnostic report containing your device model, the app's settings, and a log of recent in-app activity (for example indexing results and errors). It contains <strong>no photos and no personal data</strong>. This report is never sent automatically — you can review it and choose to share it yourself (for example by email) only if you want to help diagnose a problem.</p>
 
 <h2>Children's privacy</h2>
 <p>The app is not directed at children under 13 and does not knowingly collect any information from children.</p>
