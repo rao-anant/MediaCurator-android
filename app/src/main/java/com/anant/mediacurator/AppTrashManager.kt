@@ -44,6 +44,7 @@ class AppTrashManager(private val app: Context) : TrashManager {
                     put("type", item.type.name)
                     put("size", item.size)
                     put("date", item.dateTaken)
+                    put("trashedAt", System.currentTimeMillis())   // for 30-day auto-purge
                 })
                 resolver.delete(src, null, null)   // remove original from the gallery
                 count++; bytes += item.size; ok.add(dst.absolutePath to item.size)
@@ -79,6 +80,23 @@ class AppTrashManager(private val app: Context) : TrashManager {
 
     override fun stillTrashed(uris: List<String>): List<String> =
         uris.filter { File(it).exists() }
+
+    /** Mirror the OS 30-day recycle-bin retention: drop trashed files older than [maxAgeDays]. */
+    override fun purgeExpired() {
+        val cutoff = System.currentTimeMillis() - MAX_AGE_DAYS * 24L * 60L * 60L * 1000L
+        val index = loadIndex()
+        val expired = index.keys().asSequence().filter { name ->
+            val ts = index.optJSONObject(name)?.optLong("trashedAt") ?: 0L
+            ts in 1 until cutoff
+        }.toList()
+        if (expired.isEmpty()) return
+        for (name in expired) {
+            try { File(trashDir, name).delete() } catch (_: Exception) {}
+            index.remove(name)
+        }
+        saveIndex(index)
+        DebugLog.i("trash", "app-trash auto-purged ${expired.size} expired item(s)")
+    }
 
     override fun listTrashed(): List<MediaItem> {
         val index = loadIndex()
@@ -180,4 +198,6 @@ class AppTrashManager(private val app: Context) : TrashManager {
         try { indexFile.writeText(index.toString()) }
         catch (e: Exception) { DebugLog.e("trash", "save trash index failed", e) }
     }
+
+    private companion object { const val MAX_AGE_DAYS = 30 }
 }

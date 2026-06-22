@@ -32,6 +32,8 @@ interface TrashManager {
     fun listTrashed(): List<MediaItem>
     /** Permanently delete the given trashed [uris] (Delete forever / Empty). */
     fun purge(uris: List<String>): TrashResult
+    /** Drop trashed items older than the retention window. No-op on 11+ (the OS auto-purges). */
+    fun purgeExpired()
 
     companion object {
         @Volatile private var instance: TrashManager? = null

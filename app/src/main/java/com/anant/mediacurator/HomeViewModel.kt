@@ -21,6 +21,8 @@ data class HomeState(
     val resumeMonthKey: String?,    // for the Stage 3 deep-link
     val dupSub: String,
     val hiddenSub: String,
+    val trashSub: String,
+    val trashEmpty: Boolean,
 )
 
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
@@ -57,7 +59,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             hashStore.ensureLoaded()
             val dupGroups = if (hashStore.countEntries() == 0) -1 else hashStore.findDuplicateGroups().size
 
-            val state = buildState(media.size, totalSize, hiddenItems, totalMonths, doneMonths, resumeKey, dupGroups)
+            // In-Trash is derived from the actual trash (ground truth) — a prefs counter would
+            // drift whenever the trash changes outside our app (external restore, OS auto-purge).
+            val trashed = TrashManager.get(getApplication()).listTrashed()
+            val state = buildState(media.size, totalSize, hiddenItems, totalMonths, doneMonths, resumeKey, dupGroups,
+                trashed.size.toLong(), trashed.sumOf { it.size })
             DebugLog.i("home", "load: done media=${media.size} months=$totalMonths/$doneMonths dup=$dupGroups -> '${state.summary}'")
             _state.postValue(state)
         }
@@ -65,7 +71,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun buildState(
         total: Int, size: Long, hidden: Int,
-        totalMonths: Int, doneMonths: Int, resumeKey: String?, dupGroups: Int
+        totalMonths: Int, doneMonths: Int, resumeKey: String?, dupGroups: Int,
+        trashCount: Long, trashBytes: Long
     ): HomeState {
         val cShort = { n: Int -> GalleryAdapter.fmtCountShort(n) }
         val summary =
@@ -98,9 +105,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             else           -> "$dupGroups ${if (dupGroups == 1) "group" else "groups"}"
         }
         val hiddenSub = if (hidden == 0) "Nothing hidden yet" else "${cShort(hidden)} hidden"
+        val trashEmpty = trashCount <= 0L
+        val trashSub = if (trashEmpty) "0 items"
+                       else "${cShort(trashCount.toInt())} · ${GalleryAdapter.fmtBytes(trashBytes)}"
 
         return HomeState(summary, title, progress, progressLabel, caption, resumeLabel, button,
-            resumeKey, dupSub, hiddenSub)
+            resumeKey, dupSub, hiddenSub, trashSub, trashEmpty)
     }
 
     private val monthNames = arrayOf(

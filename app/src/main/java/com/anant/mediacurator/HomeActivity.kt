@@ -74,6 +74,9 @@ class HomeActivity : AppCompatActivity() {
         bindCard(binding.cardHidden, R.drawable.ic_home_hidden, "Hidden months", "…") {
             startActivity(Intent(this, HiddenActivity::class.java))
         }
+        bindCard(binding.cardTrash, R.drawable.ic_home_trash, "Trash", "…") {
+            startActivity(Intent(this, TrashActivity::class.java))
+        }
 
         viewModel.state.observe(this) { s -> currentState = s; render(s) }
     }
@@ -197,6 +200,11 @@ class HomeActivity : AppCompatActivity() {
 
         binding.cardDuplicates.tvCardSub.text = s.dupSub
         binding.cardHidden.tvCardSub.text     = s.hiddenSub
+        binding.cardTrash.tvCardSub.text      = s.trashSub
+        // Nothing to open when the trash is empty — dim and disable the card.
+        binding.cardTrash.root.isEnabled   = !s.trashEmpty
+        binding.cardTrash.root.isClickable = !s.trashEmpty
+        binding.cardTrash.root.alpha       = if (s.trashEmpty) 0.5f else 1f
     }
 
     private fun bindCard(card: ItemHomeCardBinding, icon: Int, title: String, sub: String, onClick: () -> Unit) {

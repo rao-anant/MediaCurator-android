@@ -26,9 +26,12 @@ object StatsDialog {
             val stats = withContext(Dispatchers.IO) {
                 compute(repo, MediaCache.get(repo), prefs.getDoneMonths())
             }
+            // In-Trash from the actual trash (exact; the prefs counter drifts on external changes).
+            val trashed = withContext(Dispatchers.IO) { TrashManager.get(app).listTrashed() }
             if (!activity.isFinishing) {
                 val ds = DeletionStatsStore.getInstance(app)
-                show(activity, stats, ds.deletedCount, ds.deletedBytes, ds.inTrashCount, ds.inTrashBytes)
+                show(activity, stats, ds.deletedCount, ds.deletedBytes,
+                    trashed.size.toLong(), trashed.sumOf { it.size })
             }
         }
     }

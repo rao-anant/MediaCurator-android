@@ -758,7 +758,9 @@ class MainActivity : AppCompatActivity() {
         // Persistent quick-undo: only while the last delete batch is still recoverable.
         val n = viewModel.lastBatchSize.value ?: 0
         menu.findItem(R.id.action_restore_last)?.let {
-            it.isVisible = n > 0 && !batchValidating   // hidden until validated (no stale flash)
+            // Show only when there's a validated recoverable batch AND we're not multi-selecting
+            // (during selection the user is choosing what to delete, not undoing).
+            it.isVisible = n > 0 && !batchValidating && !inSelection
             it.title = "Restore last deleted ($n)"
         }
         return super.onPrepareOptionsMenu(menu)

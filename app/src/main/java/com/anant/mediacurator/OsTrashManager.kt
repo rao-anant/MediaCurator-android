@@ -1,8 +1,7 @@
 package com.anant.mediacurator
 
-import android.content.ContentUris
-import android.content.ContentValues
 import android.content.Context
+import android.content.ContentValues
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -12,14 +11,18 @@ import androidx.annotation.RequiresApi
 /**
  * Android 11+ trash via the MediaStore IS_TRASHED flag — the OS recycle bin.
  *
- * With All-files access (which the app requests up front) we can flip IS_TRASHED directly with
- * ContentResolver.update, no per-item system dialog — same as the app's existing direct delete.
- * Trashed items leave our app AND the phone's gallery, and the OS auto-purges them after ~30 days.
+ * With All-files access (requested up front) we flip IS_TRASHED directly via
+ * ContentResolver.update — no per-item system dialog. Trashed items leave our app AND the
+ * phone's gallery, and the OS auto-purges them after ~30 days.
+ *
+ * Scope: we track the URIs WE trashed in a small prefs set, so the in-app Trash screen shows
+ * only items deleted from Curator — not everything trashed on the device by other apps.
  */
 @RequiresApi(Build.VERSION_CODES.R)
 class OsTrashManager(private val app: Context) : TrashManager {
 
     private val resolver get() = app.contentResolver
+    private val owned = app.getSharedPreferences("os_trash_owned", Context.MODE_PRIVATE)
 
     override fun trash(items: List<MediaItem>): TrashResult {
         var count = 0; var bytes = 0L; val ok = ArrayList<Pair<String, Long>>()
@@ -28,6 +31,7 @@ class OsTrashManager(private val app: Context) : TrashManager {
                 count++; bytes += item.size; ok.add(item.uri to item.size)
             }
         }
+        addOwned(ok.map { it.first })
         return TrashResult(count, bytes, ok)
     }
 
@@ -38,6 +42,7 @@ class OsTrashManager(private val app: Context) : TrashManager {
             val sz = sizeOf(uri)
             if (setTrashed(uri, false)) { count++; bytes += sz; ok.add(u to sz) }
         }
+        removeOwned(ok.map { it.first })
         return TrashResult(count, bytes, ok)
     }
 
@@ -52,73 +57,27 @@ class OsTrashManager(private val app: Context) : TrashManager {
                 DebugLog.e("trash", "purge failed: $u", e)
             }
         }
+        removeOwned(ok.map { it.first })
         return TrashResult(count, bytes, ok)
     }
 
-    override fun stillTrashed(uris: List<String>): List<String> = uris.filter { u ->
-        try {
-            // A direct id-uri query ignores MATCH_ONLY (it returns the addressed row regardless),
-            // so read the IS_TRASHED column directly. MATCH_INCLUDE makes a trashed row visible;
-            // a purged row yields no result → treated as not-trashed.
-            val args = Bundle().apply {
-                putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_INCLUDE)
-            }
-            resolver.query(Uri.parse(u), arrayOf(MediaStore.MediaColumns.IS_TRASHED), args, null)
-                ?.use { if (it.moveToFirst()) it.getInt(0) == 1 else false } ?: false
-        } catch (e: Exception) { false }
-    }
+    override fun stillTrashed(uris: List<String>): List<String> = uris.filter { isTrashed(Uri.parse(it)) }
 
+    override fun purgeExpired() { /* The OS auto-purges the recycle bin after ~30 days. */ }
+
+    /** Only items WE trashed that are still in the OS bin; prune any restored/purged externally. */
     override fun listTrashed(): List<MediaItem> {
         val result = ArrayList<MediaItem>()
-        val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        val projection = arrayOf(
-            MediaStore.Files.FileColumns._ID,
-            MediaStore.Files.FileColumns.DISPLAY_NAME,
-            MediaStore.Files.FileColumns.SIZE,
-            MediaStore.Files.FileColumns.MIME_TYPE,
-            MediaStore.Files.FileColumns.DATE_MODIFIED,
-            MediaStore.Files.FileColumns.RELATIVE_PATH,
-            MediaStore.Files.FileColumns.DURATION
-        )
-        val args = Bundle().apply {
-            putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_ONLY)
-            putString(
-                android.content.ContentResolver.QUERY_ARG_SQL_SORT_ORDER,
-                "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
-            )
+        val gone = HashSet<String>()
+        for (u in ownedUris()) {
+            val item = queryTrashedItem(Uri.parse(u))
+            if (item != null) result.add(item) else gone.add(u)
         }
-        try {
-            resolver.query(collection, projection, args, null)?.use { c ->
-                val idC   = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
-                val nameC = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
-                val sizeC = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
-                val mimeC = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
-                val dateC = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
-                val pathC = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.RELATIVE_PATH)
-                val durC  = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DURATION)
-                while (c.moveToNext()) {
-                    val mime = c.getString(mimeC) ?: continue
-                    val type = typeOf(mime) ?: continue
-                    val id   = c.getLong(idC)
-                    val uri  = ContentUris.withAppendedId(collection, id).toString()
-                    result.add(
-                        MediaItem(
-                            id, uri, "external",
-                            c.getLong(dateC) * 1000L,
-                            c.getString(nameC) ?: "",
-                            c.getLong(sizeC),
-                            type,
-                            if (type == MediaType.VIDEO || type == MediaType.AUDIO) c.getLong(durC) else 0L,
-                            c.getString(pathC) ?: ""
-                        )
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            DebugLog.e("trash", "listTrashed failed", e)
-        }
-        return result
+        if (gone.isNotEmpty()) removeOwned(gone)
+        return result.sortedByDescending { it.dateTaken }
     }
+
+    // ── MediaStore helpers ───────────────────────────────────────────────────────
 
     private fun setTrashed(uri: Uri, trashed: Boolean): Boolean = try {
         val values = ContentValues().apply {
@@ -129,21 +88,75 @@ class OsTrashManager(private val app: Context) : TrashManager {
         DebugLog.e("trash", "setTrashed($trashed) failed: $uri", e); false
     }
 
-    /** Size of a (possibly trashed) item; needs MATCH_INCLUDE so trashed rows are visible. */
+    private fun isTrashed(uri: Uri): Boolean = try {
+        resolver.query(uri, arrayOf(MediaStore.MediaColumns.IS_TRASHED), matchAnyArgs(), null)
+            ?.use { if (it.moveToFirst()) it.getInt(0) == 1 else false } ?: false
+    } catch (e: Exception) { false }
+
     private fun sizeOf(uri: Uri): Long = try {
-        val args = Bundle().apply {
-            putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_INCLUDE)
-        }
-        resolver.query(uri, arrayOf(MediaStore.MediaColumns.SIZE), args, null)?.use {
-            if (it.moveToFirst()) it.getLong(0) else 0L
-        } ?: 0L
+        resolver.query(uri, arrayOf(MediaStore.MediaColumns.SIZE), matchAnyArgs(), null)
+            ?.use { if (it.moveToFirst()) it.getLong(0) else 0L } ?: 0L
     } catch (e: Exception) { 0L }
 
-    private fun typeOf(mime: String): MediaType? = when {
-        mime.startsWith("image/")      -> MediaType.IMAGE
-        mime.startsWith("video/")      -> MediaType.VIDEO
-        mime.startsWith("audio/")      -> MediaType.AUDIO
-        mime == "application/pdf"      -> MediaType.PDF
-        else                           -> null
+    /** Build a MediaItem for [uri] only if it still exists AND is trashed; else null. */
+    private fun queryTrashedItem(uri: Uri): MediaItem? = try {
+        val proj = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+            MediaStore.MediaColumns.RELATIVE_PATH,
+            MediaStore.MediaColumns.DURATION,
+            MediaStore.MediaColumns.IS_TRASHED
+        )
+        resolver.query(uri, proj, matchAnyArgs(), null)?.use { c ->
+            if (!c.moveToFirst()) return null
+            if (c.getInt(c.getColumnIndexOrThrow(MediaStore.MediaColumns.IS_TRASHED)) != 1) return null
+            val mime = c.getString(c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)) ?: return null
+            val type = typeOf(mime) ?: return null
+            MediaItem(
+                c.getLong(c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)),
+                uri.toString(), "external",
+                c.getLong(c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)) * 1000L,
+                c.getString(c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)) ?: "",
+                c.getLong(c.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)),
+                type,
+                if (type == MediaType.VIDEO || type == MediaType.AUDIO)
+                    c.getLong(c.getColumnIndexOrThrow(MediaStore.MediaColumns.DURATION)) else 0L,
+                c.getString(c.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)) ?: ""
+            )
+        }
+    } catch (e: Exception) {
+        DebugLog.e("trash", "queryTrashedItem failed: $uri", e); null
     }
+
+    private fun matchAnyArgs() = Bundle().apply {
+        putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_INCLUDE)
+    }
+
+    private fun typeOf(mime: String): MediaType? = when {
+        mime.startsWith("image/")  -> MediaType.IMAGE
+        mime.startsWith("video/")  -> MediaType.VIDEO
+        mime.startsWith("audio/")  -> MediaType.AUDIO
+        mime == "application/pdf"  -> MediaType.PDF
+        else                       -> null
+    }
+
+    // ── Owned-set (URIs Curator trashed) ─────────────────────────────────────────
+
+    @Synchronized private fun ownedUris(): MutableSet<String> =
+        owned.getStringSet(KEY_OWNED, emptySet())!!.toMutableSet()
+
+    @Synchronized private fun addOwned(uris: List<String>) {
+        if (uris.isEmpty()) return
+        owned.edit().putStringSet(KEY_OWNED, ownedUris().apply { addAll(uris) }).apply()
+    }
+
+    @Synchronized private fun removeOwned(uris: Collection<String>) {
+        if (uris.isEmpty()) return
+        owned.edit().putStringSet(KEY_OWNED, ownedUris().apply { removeAll(uris.toSet()) }).apply()
+    }
+
+    private companion object { const val KEY_OWNED = "uris" }
 }
