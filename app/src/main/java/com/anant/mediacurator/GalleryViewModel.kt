@@ -339,6 +339,12 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         // by loadExplicit(); a tree rebuild here — including the 3s content-observer refresh —
         // would clobber that list and desync the screen. Ignore it.
         if (explicitViewerMode) return
+
+        // A forced refresh re-syncs with MediaStore truth: drop the never-cleared session-delete
+        // guard so items un-trashed from the system gallery reappear. (Items still in trash stay
+        // hidden because the MediaStore query already excludes IS_TRASHED rows.)
+        if (forceRefresh) sessionDeletedFingerprints.clear()
+
         val sortMode = _sortMode.value ?: SortMode.DATE_OLDEST
         val photoOn = _includePhoto.value ?: true
         val videoOn = _includeVideo.value ?: true
@@ -670,9 +676,18 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
      * items return. Trashed items are excluded from normal MediaStore queries, so clearing the
      * session-delete guards here is safe — only the just-restored items become visible again.
      */
-    /** Re-sync the quick-undo state from prefs (e.g. after a delete made on another screen). */
+    /**
+     * Re-sync the quick-undo from prefs AND validate it against the trash: if the user restored
+     * (or the OS purged) the batch from outside the app, prune those and grey the action out.
+     */
     fun refreshLastBatchSize() {
-        _lastBatchSize.value = prefs.getLastDeletedBatch().size
+        viewModelScope.launch(Dispatchers.IO) {
+            val batch = prefs.getLastDeletedBatch()
+            if (batch.isEmpty()) { _lastBatchSize.postValue(0); return@launch }
+            val alive = TrashManager.get(getApplication()).stillTrashed(batch.map { it.first }).toSet()
+            if (alive.size != batch.size) prefs.setLastDeletedBatch(batch.filter { it.first in alive })
+            _lastBatchSize.postValue(alive.size)
+        }
     }
 
     fun restoreLastBatch() {

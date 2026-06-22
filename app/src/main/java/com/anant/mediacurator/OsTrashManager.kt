@@ -55,6 +55,19 @@ class OsTrashManager(private val app: Context) : TrashManager {
         return TrashResult(count, bytes, ok)
     }
 
+    override fun stillTrashed(uris: List<String>): List<String> = uris.filter { u ->
+        try {
+            // A direct id-uri query ignores MATCH_ONLY (it returns the addressed row regardless),
+            // so read the IS_TRASHED column directly. MATCH_INCLUDE makes a trashed row visible;
+            // a purged row yields no result → treated as not-trashed.
+            val args = Bundle().apply {
+                putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_INCLUDE)
+            }
+            resolver.query(Uri.parse(u), arrayOf(MediaStore.MediaColumns.IS_TRASHED), args, null)
+                ?.use { if (it.moveToFirst()) it.getInt(0) == 1 else false } ?: false
+        } catch (e: Exception) { false }
+    }
+
     override fun listTrashed(): List<MediaItem> {
         val result = ArrayList<MediaItem>()
         val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)

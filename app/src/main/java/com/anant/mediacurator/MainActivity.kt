@@ -61,6 +61,7 @@ class MainActivity : AppCompatActivity() {
     private var jumpBMonthKey: String? = null  // where we jumped TO
 
     // Pending move state — held across the createWriteRequest consent dialog
+    private var batchValidating = false   // true while re-validating the quick-undo on resume
     private var pendingMoveItems:       List<MediaItem>? = null
     private var pendingMovePath:        String?          = null
     private var pendingMoveTargetName:  String?          = null
@@ -253,8 +254,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // A delete on another screen (viewer / Hidden / Duplicates) may have changed the
-        // last-deleted batch — re-sync the "Restore last deleted" item.
+        // A delete on another screen — or an external restore from the system gallery — may have
+        // changed the last-deleted batch. Hide the quick-undo until validation confirms it's still
+        // recoverable, so it doesn't briefly flash a stale "Restore last deleted (N)".
+        batchValidating = true
         viewModel.refreshLastBatchSize()
         // Skip menu invalidation while search results are showing. Rebuilding the menu
         // tears down the expanded SearchView, which fires onQueryTextChange("") →
@@ -529,8 +532,8 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
 
-        // Keep the persistent "Restore last deleted (N)" menu item in sync.
-        viewModel.lastBatchSize.observe(this) { invalidateOptionsMenu() }
+        // Validation finished — reveal the (now-confirmed) "Restore last deleted (N)" item.
+        viewModel.lastBatchSize.observe(this) { batchValidating = false; invalidateOptionsMenu() }
         
         viewModel.deletePermissionRequest.observe(this) { intentSender ->
             intentSender?.let {
@@ -755,7 +758,7 @@ class MainActivity : AppCompatActivity() {
         // Persistent quick-undo: only while the last delete batch is still recoverable.
         val n = viewModel.lastBatchSize.value ?: 0
         menu.findItem(R.id.action_restore_last)?.let {
-            it.isVisible = n > 0
+            it.isVisible = n > 0 && !batchValidating   // hidden until validated (no stale flash)
             it.title = "Restore last deleted ($n)"
         }
         return super.onPrepareOptionsMenu(menu)

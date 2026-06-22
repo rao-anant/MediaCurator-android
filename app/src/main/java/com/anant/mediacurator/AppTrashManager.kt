@@ -77,6 +77,9 @@ class AppTrashManager(private val app: Context) : TrashManager {
         return TrashResult(count, bytes, ok)
     }
 
+    override fun stillTrashed(uris: List<String>): List<String> =
+        uris.filter { File(it).exists() }
+
     override fun listTrashed(): List<MediaItem> {
         val index = loadIndex()
         val result = ArrayList<MediaItem>()

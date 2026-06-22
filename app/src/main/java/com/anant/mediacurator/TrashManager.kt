@@ -26,6 +26,8 @@ interface TrashManager {
     fun trash(items: List<MediaItem>): TrashResult
     /** Restore the given trashed [uris] (best-effort; skips any no longer in trash). */
     fun restore(uris: List<String>): TrashResult
+    /** Subset of [uris] that are STILL in trash (others were restored externally or purged). */
+    fun stillTrashed(uris: List<String>): List<String>
     /** Everything currently in trash, newest first — for the Trash screen. */
     fun listTrashed(): List<MediaItem>
     /** Permanently delete the given trashed [uris] (Delete forever / Empty). */

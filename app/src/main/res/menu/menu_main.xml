@@ -17,7 +17,9 @@
         app:showAsAction="ifRoom" />
     <item android:id="@+id/action_restore_last"
         android:title="Restore last deleted"
-        app:showAsAction="never" />
+        android:icon="@drawable/ic_undo"
+        app:iconTint="?attr/colorOnSurface"
+        app:showAsAction="ifRoom" />
     <item android:id="@+id/action_help"
         android:title="Help"
         app:showAsAction="never" />
