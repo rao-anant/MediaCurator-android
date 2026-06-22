@@ -66,7 +66,8 @@ And it's not just photos and videos — Media Curator brings your audio files an
 the same timeline, which your gallery app simply doesn't do.
 
 Hidden months are never deleted. They stay fully available in your phone's normal gallery,
-and you can unhide them anytime. Only items you explicitly delete are removed. Best of all,
+and you can unhide them anytime. And even when you do delete, it's never instant or final —
+items go to a recoverable Trash first, so nothing is ever lost by accident. Best of all,
 hiding keeps reviewed items out of your way, so curation stays fast and even fun.
 
 🗂️ BROWSE YOUR WAY
@@ -80,6 +81,11 @@ hiding keeps reviewed items out of your way, so curation stays fast and even fun
 • Long-press to multi-select, then delete, share, or move in one go
 • Selection size shown before you confirm — no surprises
 • Mark months done and watch your progress add up
+
+♻️ DELETE WITHOUT FEAR
+• Deletes go to a recoverable Trash, not gone forever
+• Undo the last delete instantly, or restore anything from Trash
+• Items auto-clear from Trash after 30 days, or empty it yourself anytime
 
 🧹 RECLAIM SPACE
 • File size on every thumbnail; duration on videos and audio
