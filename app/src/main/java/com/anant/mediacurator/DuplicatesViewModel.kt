@@ -131,42 +131,26 @@ class DuplicatesViewModel(app: Application) : AndroidViewModel(app) {
         if (toDelete.isEmpty()) { _deletionResult.value = 0; return }
 
         viewModelScope.launch(Dispatchers.IO) {
-            val resolver = getApplication<Application>().contentResolver
-            var deleted = 0
-            var deletedBytes = 0L
-            val needPermission = mutableListOf<MediaItem>()
-
-            for (item in toDelete) {
-                try {
-                    val rows = resolver.delete(Uri.parse(item.uri), null, null)
-                    if (rows > 0) {
-                        photoHashStore.deleteEntry(item.id)
-                        deleted++
-                        deletedBytes += item.size
-                    } else {
-                        needPermission.add(item)
-                    }
-                } catch (e: Exception) {
-                    Log.w("DuplicatesViewModel", "Direct delete failed for ${item.displayName}", e)
-                    needPermission.add(item)
-                }
-            }
+            // Soft-delete to trash (recoverable), same as the gallery.
+            val result = TrashManager.get(getApplication()).trash(toDelete)
+            toDelete.forEach { photoHashStore.deleteEntry(it.id) }   // drop dup fingerprints
             photoHashStore.flush()
+            PreferencesManager(getApplication()).setLastDeletedBatch(result.entries)
+            DeletionStatsStore.getInstance(getApplication()).onTrashed(result.count, result.bytes)
+            withContext(Dispatchers.Main) { finishDeletion(result.count, result.bytes) }
+        }
+    }
 
-            if (needPermission.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                // Some photos need a system permission dialog (Android 11+ without MANAGE_MEDIA,
-                // or on devices where direct delete is blocked).
-                val intentSender = repo.createDeleteRequest(needPermission)
-                if (intentSender != null) {
-                    pendingDeleteItems = needPermission
-                    directlyDeletedCount = deleted
-                    directlyDeletedBytes = deletedBytes
-                    _deletePermissionRequest.postValue(intentSender)
-                    return@launch
-                }
-            }
-
-            withContext(Dispatchers.Main) { finishDeletion(deleted, deletedBytes) }
+    /** Undo the last delete batch (shared with the gallery via prefs). */
+    fun restoreLastBatch() {
+        val prefs = PreferencesManager(getApplication())
+        val batch = prefs.getLastDeletedBatch()
+        if (batch.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val r = TrashManager.get(getApplication()).restore(batch.map { it.first })
+            DeletionStatsStore.getInstance(getApplication()).onRestored(r.count, r.bytes)
+            prefs.clearLastDeletedBatch()
+            withContext(Dispatchers.Main) { loadDuplicates() }   // re-scan so restored items re-appear
         }
     }
 
@@ -194,8 +178,7 @@ class DuplicatesViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun finishDeletion(totalDeleted: Int, totalBytes: Long) {
         _deletionResult.value = totalDeleted
-        // Lifetime cumulative-deletion counter (shown in the gallery Stats dialog).
-        DeletionStatsStore.getInstance(getApplication()).record(totalDeleted, totalBytes)
+        // Stats are recorded by deleteMarked() via onTrashed — don't double-count here.
         // Reload to reflect the new state (deleted items gone, orphaned groups removed)
         loadDuplicates()
     }

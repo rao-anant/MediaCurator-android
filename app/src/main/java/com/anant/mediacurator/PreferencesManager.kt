@@ -2,6 +2,8 @@ package com.anant.mediacurator
 
 import android.content.Context
 import android.content.SharedPreferences
+import org.json.JSONArray
+import org.json.JSONObject
 
 class PreferencesManager(context: Context) {
     private val prefs: SharedPreferences =
@@ -108,6 +110,28 @@ class PreferencesManager(context: Context) {
         prefs.edit().putBoolean(KEY_HIDDEN_RESTORE_OFFERED, true).apply()
     }
 
+    /**
+     * The most recent delete batch, as (contentUri, sizeBytes) pairs, for the persistent
+     * "Restore last deleted" quick-undo. Replaced on each delete; cleared once used, emptied,
+     * or purged. Survives app restart.
+     */
+    fun setLastDeletedBatch(items: List<Pair<String, Long>>) {
+        if (items.isEmpty()) { clearLastDeletedBatch(); return }
+        val arr = JSONArray()
+        items.forEach { (uri, size) -> arr.put(JSONObject().put("uri", uri).put("size", size)) }
+        prefs.edit().putString(KEY_LAST_BATCH, arr.toString()).apply()
+    }
+    fun getLastDeletedBatch(): List<Pair<String, Long>> {
+        val s = prefs.getString(KEY_LAST_BATCH, null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(s)
+            (0 until arr.length()).map {
+                val o = arr.getJSONObject(it); o.getString("uri") to o.getLong("size")
+            }
+        } catch (e: Exception) { emptyList() }
+    }
+    fun clearLastDeletedBatch() { prefs.edit().remove(KEY_LAST_BATCH).apply() }
+
     /** First-run onboarding: true once the user has seen the "how curation works" intro. */
     fun hasSeenOnboarding(): Boolean = prefs.getBoolean(KEY_SEEN_ONBOARDING, false)
     fun setSeenOnboarding() {
@@ -134,6 +158,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_PDF_CONTENT_SEARCH        = "pdf_content_search"
         private const val KEY_PHOTO_DUPLICATE_DETECTION = "photo_duplicate_detection"
         private const val KEY_SEEN_ONBOARDING           = "seen_onboarding"
+        private const val KEY_LAST_BATCH                 = "last_deleted_batch"
         private const val KEY_ALL_FILES_PROMPT_SHOWN    = "all_files_prompt_shown"
         private const val KEY_HIDDEN_RESTORE_OFFERED     = "hidden_restore_offered"
     }

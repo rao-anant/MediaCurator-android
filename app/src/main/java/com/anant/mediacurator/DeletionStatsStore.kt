@@ -28,9 +28,11 @@ import java.util.concurrent.Executors
 class DeletionStatsStore private constructor(context: Context) {
 
     companion object {
-        private const val PREFS      = "deletion_stats"
-        private const val KEY_COUNT  = "deleted_count"
-        private const val KEY_BYTES  = "deleted_bytes"
+        private const val PREFS          = "deletion_stats"
+        private const val KEY_COUNT      = "deleted_count"
+        private const val KEY_BYTES      = "deleted_bytes"
+        private const val KEY_TRASH_COUNT = "trash_count"
+        private const val KEY_TRASH_BYTES = "trash_bytes"
         const val BACKUP_FILENAME    = "mediacurator_stats.json"
 
         @Volatile private var instance: DeletionStatsStore? = null
@@ -44,10 +46,16 @@ class DeletionStatsStore private constructor(context: Context) {
     private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val io    = Executors.newSingleThreadExecutor()
 
+    // "Cleaned up" — net items the user got rid of (counts at trash time, minus restores;
+    // NOT decremented when trash is emptied/purged, since those are gone for good).
     val deletedCount: Long get() = prefs.getLong(KEY_COUNT, 0L)
     val deletedBytes: Long get() = prefs.getLong(KEY_BYTES, 0L)
 
-    /** Add a confirmed deletion of [count] items totalling [bytes]. */
+    // "In Trash" — current recoverable trash occupancy (trash − restore − empty/purge).
+    val inTrashCount: Long get() = prefs.getLong(KEY_TRASH_COUNT, 0L)
+    val inTrashBytes: Long get() = prefs.getLong(KEY_TRASH_BYTES, 0L)
+
+    /** Add a confirmed PERMANENT deletion (e.g. legacy/no-trash path): Cleaned-up only. */
     @Synchronized
     fun record(count: Int, bytes: Long) {
         if (count <= 0) return
@@ -55,8 +63,47 @@ class DeletionStatsStore private constructor(context: Context) {
             .putLong(KEY_COUNT, deletedCount + count)
             .putLong(KEY_BYTES, deletedBytes + bytes.coerceAtLeast(0L))
             .apply()
-        DebugLog.i("stats", "record +$count items, +${bytes}B -> total ${deletedCount} items / ${deletedBytes}B")
         io.execute { writeBackup() }   // mirror to Downloads off the main thread
+    }
+
+    /** Items moved to trash: Cleaned-up += and In-Trash +=. */
+    @Synchronized
+    fun onTrashed(count: Int, bytes: Long) {
+        if (count <= 0) return
+        val b = bytes.coerceAtLeast(0L)
+        prefs.edit()
+            .putLong(KEY_COUNT, deletedCount + count)
+            .putLong(KEY_BYTES, deletedBytes + b)
+            .putLong(KEY_TRASH_COUNT, inTrashCount + count)
+            .putLong(KEY_TRASH_BYTES, inTrashBytes + b)
+            .apply()
+        io.execute { writeBackup() }
+    }
+
+    /** Items restored from trash: Cleaned-up −= and In-Trash −= (the storage comes back). */
+    @Synchronized
+    fun onRestored(count: Int, bytes: Long) {
+        if (count <= 0) return
+        val b = bytes.coerceAtLeast(0L)
+        prefs.edit()
+            .putLong(KEY_COUNT, (deletedCount - count).coerceAtLeast(0L))
+            .putLong(KEY_BYTES, (deletedBytes - b).coerceAtLeast(0L))
+            .putLong(KEY_TRASH_COUNT, (inTrashCount - count).coerceAtLeast(0L))
+            .putLong(KEY_TRASH_BYTES, (inTrashBytes - b).coerceAtLeast(0L))
+            .apply()
+        io.execute { writeBackup() }
+    }
+
+    /** Trash emptied/purged: In-Trash −= only (Cleaned-up stays — they're gone for good). */
+    @Synchronized
+    fun onPurged(count: Int, bytes: Long) {
+        if (count <= 0) return
+        val b = bytes.coerceAtLeast(0L)
+        prefs.edit()
+            .putLong(KEY_TRASH_COUNT, (inTrashCount - count).coerceAtLeast(0L))
+            .putLong(KEY_TRASH_BYTES, (inTrashBytes - b).coerceAtLeast(0L))
+            .apply()
+        io.execute { writeBackup() }
     }
 
     /**
@@ -71,11 +118,16 @@ class DeletionStatsStore private constructor(context: Context) {
                 val obj   = org.json.JSONObject(text)
                 val count = obj.optLong("deletedCount", 0L)
                 val bytes = obj.optLong("deletedBytes", 0L)
+                val tCount = obj.optLong("trashCount", 0L)
+                val tBytes = obj.optLong("trashBytes", 0L)
                 synchronized(this) {
                     // Re-check inside the lock: if a delete landed while we were reading,
                     // don't clobber it (record() is also synchronized on this).
                     if ((count > 0L || bytes > 0L) && deletedCount == 0L && deletedBytes == 0L) {
-                        prefs.edit().putLong(KEY_COUNT, count).putLong(KEY_BYTES, bytes).apply()
+                        prefs.edit()
+                            .putLong(KEY_COUNT, count).putLong(KEY_BYTES, bytes)
+                            .putLong(KEY_TRASH_COUNT, tCount).putLong(KEY_TRASH_BYTES, tBytes)
+                            .apply()
                         Log.i("DeletionStats", "Restored: $count items, $bytes bytes")
                     }
                 }
@@ -88,7 +140,8 @@ class DeletionStatsStore private constructor(context: Context) {
     // ── Downloads mirror I/O ────────────────────────────────────────────────────
 
     private fun json(): String =
-        "{\"deletedCount\": $deletedCount, \"deletedBytes\": $deletedBytes}"
+        "{\"deletedCount\": $deletedCount, \"deletedBytes\": $deletedBytes, " +
+        "\"trashCount\": $inTrashCount, \"trashBytes\": $inTrashBytes}"
 
     private fun writeBackup() {
         @Suppress("DEPRECATION")

@@ -164,6 +164,16 @@ class MediaViewerActivity : AppCompatActivity() {
             }
         }
 
+        // After a delete (now a soft-delete to Trash), offer an immediate Undo.
+        viewModel.storageSavedEvent.observe(this) { _ ->
+            val n = viewModel.lastBatchSize.value ?: 0
+            if (n <= 0) return@observe
+            com.google.android.material.snackbar.Snackbar
+                .make(binding.root, "Moved to Trash", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
+                .setAction("Undo") { viewModel.restoreLastBatch() }
+                .show()
+        }
+
         viewModel.renamePermissionRequest.observe(this) { intentSender ->
             intentSender?.let {
                 renameLauncher.launch(IntentSenderRequest.Builder(it).build())

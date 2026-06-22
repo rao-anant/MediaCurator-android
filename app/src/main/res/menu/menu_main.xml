@@ -15,6 +15,9 @@
     <item android:id="@+id/action_refresh" android:title="Refresh"
         android:icon="@android:drawable/ic_menu_rotate"
         app:showAsAction="ifRoom" />
+    <item android:id="@+id/action_restore_last"
+        android:title="Restore last deleted"
+        app:showAsAction="never" />
     <item android:id="@+id/action_help"
         android:title="Help"
         app:showAsAction="never" />

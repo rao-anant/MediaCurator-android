@@ -84,6 +84,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private val _deletionCompletedEvent = MutableLiveData<Boolean>()
     val deletionCompletedEvent: LiveData<Boolean> = _deletionCompletedEvent
 
+    // Size of the most recent delete batch, for the persistent "Restore last deleted (N)" action.
+    // 0 = nothing to restore (greyed out). Seeded from prefs so it survives app restart.
+    private val _lastBatchSize = MutableLiveData<Int>(0)
+    val lastBatchSize: LiveData<Int> = _lastBatchSize
+
     // Rename flow — mirrors the delete permission pattern
     private val _renamePermissionRequest = MutableLiveData<IntentSender?>()
     val renamePermissionRequest: LiveData<IntentSender?> = _renamePermissionRequest
@@ -232,6 +237,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         // (covers fresh install, app-data clear, reinstall after uninstall).
         checkAndAutoRestore()
         registerMediaObserver()
+        _lastBatchSize.value = prefs.getLastDeletedBatch().size   // restore quick-undo state
     }
 
     fun setIncludePhoto(include: Boolean) {
@@ -625,61 +631,28 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                     bm25IndexCache = null
                 }
 
-                val resolver = getApplication<Application>().contentResolver
+                // Soft-delete: move to trash (OS recycle bin on 11+, app trash on ≤10).
+                // Dialog-free via All-files; recoverable via Undo / Restore-last / the Trash screen.
+                val result = TrashManager.get(getApplication()).trash(items)
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    // PDFs are accessed via MANAGE_EXTERNAL_STORAGE and may live in
-                    // MediaStore.Files or MediaStore.Downloads collections.
-                    // createDeleteRequest can throw for those URIs ("not owned by calling app"),
-                    // which would roll back sessionDeletedFingerprints and make the PDF reappear.
-                    // Delete PDFs directly via resolver.delete() — MANAGE_EXTERNAL_STORAGE covers this.
-                    val pdfItems   = items.filter { it.type == MediaType.PDF }
-                    val mediaItems = items.filter { it.type != MediaType.PDF }
+                // Persist the last batch for the quick-undo, and update stats (cleaned-up + in-trash).
+                prefs.setLastDeletedBatch(result.entries)
+                DeletionStatsStore.getInstance(getApplication()).onTrashed(result.count, result.bytes)
 
-                    pdfItems.forEach { item ->
-                        try {
-                            resolver.delete(android.net.Uri.parse(item.uri), null, null)
-                        } catch (e: Exception) {
-                            // id + size, not displayName — diagnostics may be shared off-device
-                            DebugLog.e("gallery", "PDF direct delete failed: id=${item.id} ${item.size}B", e)
-                        }
-                    }
+                withContext(Dispatchers.Main) {
+                    _lastBatchSize.postValue(result.count)
+                    updateUiAfterDeletion(fingerprints, result.bytes)
+                }
 
-                    if (mediaItems.isNotEmpty()) {
-                        // Android 11+: use createDeleteRequest for images/videos.
-                        // On Android 12+ with MANAGE_MEDIA granted this runs silently (no dialog).
-                        // On Android 11 or without MANAGE_MEDIA a system confirmation dialog appears.
-                        val intentSender = repo.createDeleteRequest(mediaItems)
-                        if (intentSender != null) {
-                            pendingItemsToDelete = mediaItems
-                            pendingBytesToFree = mediaItems.sumOf { it.size }
-                            _deletePermissionRequest.postValue(intentSender)
-                            // PDF deletions already done above; the media deletions will
-                            // trigger updateUiAfterDeletion via onDeletePermissionResult.
-                        } else {
-                            // createDeleteRequest failed — roll back media items only.
-                            val mediaFps = mediaItems.map { getFingerprint(it) }
-                            deletedFingerprintsInFlight.removeAll(mediaFps.toSet())
-                            sessionDeletedFingerprints.removeAll(mediaFps.toSet())
-                            cachedRawMedia = null
-                            loadMedia(forceRefresh = true)
-                        }
-                    } else {
-                        // Only PDFs — no createDeleteRequest needed, fire completion now.
-                        withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            updateUiAfterDeletion(fingerprints, totalBytes)
-                        }
-                    }
-                } else {
-                    // Pre-R: direct deletion, no dialog needed.
-                    items.forEach { item ->
-                        try {
-                            resolver.delete(android.net.Uri.parse(item.uri), null, null)
-                        } catch (e: Exception) { e.printStackTrace() }
-                    }
-                    withContext(kotlinx.coroutines.Dispatchers.Main) {
-                        updateUiAfterDeletion(fingerprints, totalBytes)
-                    }
+                // Any items that couldn't be trashed (rare — e.g. All-files not granted): drop
+                // their session guards and reload so they reappear instead of silently vanishing.
+                if (result.count < items.size) {
+                    val trashed = result.entries.map { it.first }.toSet()
+                    val failedFps = items.filter { it.uri !in trashed }.map { getFingerprint(it) }
+                    deletedFingerprintsInFlight.removeAll(failedFps.toSet())
+                    sessionDeletedFingerprints.removeAll(failedFps.toSet())
+                    cachedRawMedia = null
+                    loadMedia(forceRefresh = true)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -688,6 +661,32 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 cachedRawMedia = null
                 loadMedia(forceRefresh = true)
             }
+        }
+    }
+
+    /**
+     * Restore the most recent delete batch (the persistent quick-undo). Un-trashes those items,
+     * reverses the stats, clears the saved batch (so the action greys out), and reloads so the
+     * items return. Trashed items are excluded from normal MediaStore queries, so clearing the
+     * session-delete guards here is safe — only the just-restored items become visible again.
+     */
+    /** Re-sync the quick-undo state from prefs (e.g. after a delete made on another screen). */
+    fun refreshLastBatchSize() {
+        _lastBatchSize.value = prefs.getLastDeletedBatch().size
+    }
+
+    fun restoreLastBatch() {
+        val batch = prefs.getLastDeletedBatch()
+        if (batch.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = TrashManager.get(getApplication()).restore(batch.map { it.first })
+            DeletionStatsStore.getInstance(getApplication()).onRestored(result.count, result.bytes)
+            prefs.clearLastDeletedBatch()
+            deletedFingerprintsInFlight.clear()
+            sessionDeletedFingerprints.clear()
+            cachedRawMedia = null
+            withContext(Dispatchers.Main) { _lastBatchSize.postValue(0) }
+            loadMedia(forceRefresh = true)
         }
     }
 
@@ -797,8 +796,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         // Library changed — drop the shared cache so the Home hub recomputes fresh counts.
         MediaCache.invalidate()
 
-        // Lifetime cumulative-deletion counter (shown in the Stats dialog).
-        DeletionStatsStore.getInstance(getApplication()).record(fingerprints.size, bytesFreed)
+        // (Stats are recorded by the trash/restore path via DeletionStatsStore.onTrashed.)
 
         // Immediately remove deleted items from the flat list so MediaViewerActivity
         // can advance to the next item without waiting for the first MediaStore refresh.

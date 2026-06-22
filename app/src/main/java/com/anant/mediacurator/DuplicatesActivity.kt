@@ -108,8 +108,14 @@ class DuplicatesActivity : AppCompatActivity() {
 
         viewModel.deletionResult.observe(this) { count ->
             count ?: return@observe
-            val msg = if (count > 0) "Deleted $count duplicate${if (count > 1) "s" else ""}" else "Nothing deleted"
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+            if (count > 0) {
+                com.google.android.material.snackbar.Snackbar
+                    .make(binding.root, "Moved $count to Trash", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
+                    .setAction("Undo") { viewModel.restoreLastBatch() }
+                    .show()
+            } else {
+                Toast.makeText(this, "Nothing deleted", Toast.LENGTH_SHORT).show()
+            }
             viewModel.clearDeletionResult()
         }
 

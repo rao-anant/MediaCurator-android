@@ -28,7 +28,7 @@ object StatsDialog {
             }
             if (!activity.isFinishing) {
                 val ds = DeletionStatsStore.getInstance(app)
-                show(activity, stats, ds.deletedCount, ds.deletedBytes)
+                show(activity, stats, ds.deletedCount, ds.deletedBytes, ds.inTrashCount, ds.inTrashBytes)
             }
         }
     }
@@ -55,7 +55,11 @@ object StatsDialog {
         )
     }
 
-    private fun show(activity: AppCompatActivity, s: MediaStats, deletedCount: Long, deletedBytes: Long) {
+    private fun show(
+        activity: AppCompatActivity, s: MediaStats,
+        deletedCount: Long, deletedBytes: Long,
+        inTrashCount: Long, inTrashBytes: Long
+    ) {
         fun row(label: String, vis: Int, hid: Int, tot: Int) =
             "%-8s %5d + %5d = %5d".format(label, vis, hid, tot)
         fun rowB(label: String, vb: Long, hb: Long) =
@@ -83,8 +87,12 @@ object StatsDialog {
             appendLine(rowB("All", vbAll, hbAll))
             appendLine()
             appendLine("CLEANED UP (lifetime)")
-            appendLine("Deleted   %,d items".format(deletedCount))
-            appendLine("Freed     %s".format(fmtBytes(deletedBytes)))
+            appendLine("Removed   %,d items".format(deletedCount))
+            appendLine("Size      %s".format(fmtBytes(deletedBytes)))
+            appendLine()
+            appendLine("IN TRASH (recoverable)")
+            appendLine("Items     %,d".format(inTrashCount))
+            appendLine("Size      %s".format(fmtBytes(inTrashBytes)))
             appendLine()
             append(s.integrityDetail)
         }

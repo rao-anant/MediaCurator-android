@@ -253,6 +253,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // A delete on another screen (viewer / Hidden / Duplicates) may have changed the
+        // last-deleted batch — re-sync the "Restore last deleted" item.
+        viewModel.refreshLastBatchSize()
         // Skip menu invalidation while search results are showing. Rebuilding the menu
         // tears down the expanded SearchView, which fires onQueryTextChange("") →
         // search("") → clearSearch() → search results are lost. The checkable items
@@ -517,17 +520,17 @@ class MainActivity : AppCompatActivity() {
             if (viewModel.searchResults.value == null) updateSortSubtitle()
         }
 
-        viewModel.storageSavedEvent.observe(this) { bytes ->
-            val text = when {
-                bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824.0)
-                bytes >= 1_048_576L     -> "%.1f MB".format(bytes / 1_048_576.0)
-                bytes >= 1_024L         -> "%.1f KB".format(bytes / 1_024.0)
-                else                    -> "$bytes B"
-            }
+        viewModel.storageSavedEvent.observe(this) { _ ->
+            val n = viewModel.lastBatchSize.value ?: 0
+            if (n <= 0) return@observe
             com.google.android.material.snackbar.Snackbar
-                .make(binding.root, "Freed $text", com.google.android.material.snackbar.Snackbar.LENGTH_SHORT)
+                .make(binding.root, "Moved $n to Trash", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
+                .setAction("Undo") { viewModel.restoreLastBatch() }
                 .show()
         }
+
+        // Keep the persistent "Restore last deleted (N)" menu item in sync.
+        viewModel.lastBatchSize.observe(this) { invalidateOptionsMenu() }
         
         viewModel.deletePermissionRequest.observe(this) { intentSender ->
             intentSender?.let {
@@ -749,6 +752,12 @@ class MainActivity : AppCompatActivity() {
         // Search now lives on the Home hub (dedicated SearchActivity) — hide the gallery lens.
         menu.findItem(R.id.action_search)?.isVisible = false
         menu.findItem(R.id.action_refresh)?.isVisible = !inSelection
+        // Persistent quick-undo: only while the last delete batch is still recoverable.
+        val n = viewModel.lastBatchSize.value ?: 0
+        menu.findItem(R.id.action_restore_last)?.let {
+            it.isVisible = n > 0
+            it.title = "Restore last deleted ($n)"
+        }
         return super.onPrepareOptionsMenu(menu)
     }
 
@@ -759,6 +768,7 @@ class MainActivity : AppCompatActivity() {
         R.id.sort_size_month    -> { viewModel.setSortMode(SortMode.SIZE_WITHIN_MONTH); true }
         R.id.sort_count_month   -> { viewModel.setSortMode(SortMode.COUNT_PER_MONTH);   true }
         R.id.action_refresh -> { viewModel.loadMedia(forceRefresh = true); true }
+        R.id.action_restore_last -> { viewModel.restoreLastBatch(); showToast("Restoring last deleted…"); true }
         R.id.action_stats_info -> { StatsDialog.present(this); true }
         R.id.action_help -> { startActivity(Intent(this, HelpActivity::class.java)); true }
         R.id.action_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
