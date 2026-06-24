@@ -523,14 +523,8 @@ class MainActivity : AppCompatActivity() {
             if (viewModel.searchResults.value == null) updateSortSubtitle()
         }
 
-        viewModel.storageSavedEvent.observe(this) { _ ->
-            val n = viewModel.lastBatchSize.value ?: 0
-            if (n <= 0) return@observe
-            com.google.android.material.snackbar.Snackbar
-                .make(binding.root, "Moved $n to Trash", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
-                .setAction("Undo") { viewModel.restoreLastBatch() }
-                .show()
-        }
+        // Soft-delete is silent now (no per-delete snackbar). Undo is the toolbar ↶ icon and the
+        // overflow "Restore last deleted"; Trash is the catch-all. Keep them in sync below.
 
         // Validation finished — reveal the (now-confirmed) "Restore last deleted (N)" item.
         viewModel.lastBatchSize.observe(this) { batchValidating = false; invalidateOptionsMenu() }

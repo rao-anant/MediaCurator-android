@@ -164,14 +164,12 @@ class MediaViewerActivity : AppCompatActivity() {
             }
         }
 
-        // After a delete (now a soft-delete to Trash), offer an immediate Undo.
-        viewModel.storageSavedEvent.observe(this) { _ ->
-            val n = viewModel.lastBatchSize.value ?: 0
-            if (n <= 0) return@observe
-            com.google.android.material.snackbar.Snackbar
-                .make(binding.root, "Moved to Trash", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
-                .setAction("Undo") { viewModel.restoreLastBatch() }
-                .show()
+        // Soft-delete is silent (no per-delete snackbar). Instead, a ↶ button appears in the
+        // bottom toolbar whenever there's a recoverable last batch — one-tap undo right here.
+        binding.btnUndoDelete.imageTintList = null
+        binding.btnUndoDelete.setOnClickListener { viewModel.restoreLastBatch() }
+        viewModel.lastBatchSize.observe(this) { n ->
+            binding.btnUndoDelete.isVisible = (n ?: 0) > 0
         }
 
         viewModel.renamePermissionRequest.observe(this) { intentSender ->

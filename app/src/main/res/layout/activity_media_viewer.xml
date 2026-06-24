@@ -71,6 +71,15 @@
             android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@drawable/ic_delete"
             android:contentDescription="Delete" />
+
+        <ImageButton
+            android:id="@+id/btnUndoDelete"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_undo"
+            android:contentDescription="Restore last deleted"
+            android:visibility="gone" />
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

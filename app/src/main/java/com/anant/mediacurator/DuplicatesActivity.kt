@@ -108,14 +108,9 @@ class DuplicatesActivity : AppCompatActivity() {
 
         viewModel.deletionResult.observe(this) { count ->
             count ?: return@observe
-            if (count > 0) {
-                com.google.android.material.snackbar.Snackbar
-                    .make(binding.root, "Moved $count to Trash", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
-                    .setAction("Undo") { viewModel.restoreLastBatch() }
-                    .show()
-            } else {
-                Toast.makeText(this, "Nothing deleted", Toast.LENGTH_SHORT).show()
-            }
+            // Soft-delete is silent (the duplicates are confirmed via a dialog first, and go to
+            // a recoverable Trash). Only surface the no-op case.
+            if (count == 0) Toast.makeText(this, "Nothing deleted", Toast.LENGTH_SHORT).show()
             viewModel.clearDeletionResult()
         }
 
