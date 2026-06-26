@@ -62,6 +62,12 @@ class PreferencesManager(context: Context) {
     fun getExpandedSubGroups(): Set<String> =
         prefs.getStringSet(KEY_EXPANDED_SUBGROUPS, emptySet()) ?: emptySet()
 
+    fun saveSeenSubGroups(subGroups: Set<String>) {
+        prefs.edit().putStringSet(KEY_SEEN_SUBGROUPS, subGroups).apply()
+    }
+    fun getSeenSubGroups(): Set<String> =
+        prefs.getStringSet(KEY_SEEN_SUBGROUPS, emptySet()) ?: emptySet()
+
     fun saveIncludePhoto(include: Boolean) {
         prefs.edit().putBoolean(KEY_INCLUDE_PHOTO, include).apply()
     }
@@ -155,6 +161,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_EXPANDED_YEARS       = "expanded_years"
         private const val KEY_EXPANDED_MONTHS      = "expanded_months"
         private const val KEY_EXPANDED_SUBGROUPS   = "expanded_subgroups"
+        private const val KEY_SEEN_SUBGROUPS       = "seen_subgroups"
         private const val KEY_PDF_CONTENT_SEARCH        = "pdf_content_search"
         private const val KEY_PHOTO_DUPLICATE_DETECTION = "photo_duplicate_detection"
         private const val KEY_SEEN_ONBOARDING           = "seen_onboarding"

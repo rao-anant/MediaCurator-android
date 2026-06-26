@@ -223,6 +223,10 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private val expandedYears     = Collections.synchronizedSet(mutableSetOf<Int>())
     private val expandedMonths    = Collections.synchronizedSet(mutableSetOf<String>())
     private val expandedSubGroups = Collections.synchronizedSet(mutableSetOf<String>())
+    // Sub-groups the user has opened at least once. Never cleared on collapse; persisted
+    // across sessions so the "Hide Month" button reappears only after both Camera and
+    // WhatsApp have been reviewed (possibly across different launches).
+    private val seenSubGroups     = Collections.synchronizedSet(mutableSetOf<String>())
 
     init {
         _sortMode.value = prefs.getSortMode()
@@ -233,6 +237,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         expandedYears.addAll(prefs.getExpandedYears())
         expandedMonths.addAll(prefs.getExpandedMonths())
         expandedSubGroups.addAll(prefs.getExpandedSubGroups())
+        seenSubGroups.addAll(prefs.getSeenSubGroups())
         // Silently restore hidden-month state from the auto-backup if prefs are empty
         // (covers fresh install, app-data clear, reinstall after uninstall).
         checkAndAutoRestore()
@@ -295,7 +300,14 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleSubGroupExpansion(subKey: String) {
-        if (expandedSubGroups.contains(subKey)) expandedSubGroups.remove(subKey) else expandedSubGroups.add(subKey)
+        if (expandedSubGroups.contains(subKey)) {
+            expandedSubGroups.remove(subKey)
+        } else {
+            expandedSubGroups.add(subKey)
+            if (seenSubGroups.add(subKey)) {  // first time opened — persist the "seen" state
+                prefs.saveSeenSubGroups(seenSubGroups.toSet())
+            }
+        }
         prefs.saveExpandedSubGroups(expandedSubGroups.toSet())
         structuralVersion++
         loadMedia(forceRefresh = false)
@@ -469,6 +481,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 val expandedYearsSnapshot     = expandedYears.toSet()
                 val expandedMonthsSnapshot    = expandedMonths.toSet()
                 val expandedSubGroupsSnapshot = expandedSubGroups.toSet()
+                val seenSubGroupsSnapshot     = seenSubGroups.toSet()
 
                 val treeItems = ArrayList<GalleryItem>()
                 for ((year, months) in yearToMonths) {
@@ -505,11 +518,15 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                                 val waItems  = group.items.filter { it.isWhatsApp }
                                 val camItems = group.items.filter { !it.isWhatsApp }
 
+                                val showHideButton: Boolean
                                 if (waItems.isEmpty()) {
-                                    // No WhatsApp items — flat layout (current behavior)
+                                    // No WhatsApp items — flat layout, show items directly
                                     group.items.forEachIndexed { index, mediaItem ->
                                         treeItems.add(GalleryItem.Media(mediaItem, group.key, index, null, currentVersion))
                                     }
+                                    // Flat month: no sub-groups to gate on — expanding the month
+                                    // IS the review, so the button is available right away.
+                                    showHideButton = true
                                 } else {
                                     val camKey = "${group.key}:cam"
                                     val waKey  = "${group.key}:wa"
@@ -553,8 +570,12 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                                             treeItems.add(GalleryItem.Media(mediaItem, group.key, index, null, currentVersion))
                                         }
                                     }
+                                    // Both sub-groups must have been opened at least once this session
+                                    val camSeen = camItems.isEmpty() || seenSubGroupsSnapshot.contains(camKey)
+                                    val waSeen  = seenSubGroupsSnapshot.contains(waKey)
+                                    showHideButton = camSeen && waSeen
                                 }
-                                treeItems.add(GalleryItem.Footer(group.key, currentVersion))
+                                treeItems.add(GalleryItem.Footer(group.key, currentVersion, showHideButton))
                             }
                         }
                     }

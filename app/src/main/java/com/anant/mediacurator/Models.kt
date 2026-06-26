@@ -120,6 +120,7 @@ sealed class GalleryItem {
 
     data class Footer(
         val monthKey: String,
-        override val structuralVersion: Int = 0
+        override val structuralVersion: Int = 0,
+        val showHideButton: Boolean = false
     ) : GalleryItem()
 }

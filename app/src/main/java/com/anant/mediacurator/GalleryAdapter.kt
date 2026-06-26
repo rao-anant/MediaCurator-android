@@ -298,7 +298,7 @@ class GalleryAdapter(
         private val btnHide: MaterialButton = itemView.findViewById(R.id.btnHideMonthFooter)
         
         fun bind(footer: GalleryItem.Footer) {
-            btnHide.visibility = if (selectionMode) View.GONE else View.VISIBLE
+            btnHide.visibility = if (!selectionMode && footer.showHideButton) View.VISIBLE else View.GONE
             btnHide.setOnClickListener {
                 val parts = footer.monthKey.split("-")
                 if (parts.size == 2) {

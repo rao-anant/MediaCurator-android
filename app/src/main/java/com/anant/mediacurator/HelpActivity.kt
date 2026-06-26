@@ -1,6 +1,7 @@
 package com.anant.mediacurator
 
 import android.os.Bundle
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import com.anant.mediacurator.databinding.ActivityHelpBinding
 import com.anant.mediacurator.databinding.ItemHelpCardBinding
@@ -34,6 +35,7 @@ class HelpActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         binding = ActivityHelpBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
