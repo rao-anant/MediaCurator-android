@@ -41,6 +41,9 @@ class TrashViewModel(app: Application) : AndroidViewModel(app) {
             val r = withContext(Dispatchers.IO) { TrashManager.get(getApplication()).restore(uris) }
             stats.onRestored(r.count, r.bytes)
             dropFromLastBatch(uris)
+            // Restore changes MediaStore (items return to the library); drop the shared cache so
+            // Home and Stats recompute from fresh data on return instead of a stale count.
+            MediaCache.invalidate()
             load()
         }
     }
@@ -53,6 +56,9 @@ class TrashViewModel(app: Application) : AndroidViewModel(app) {
             val r = withContext(Dispatchers.IO) { TrashManager.get(getApplication()).purge(uris) }
             stats.onPurged(r.count, r.bytes)
             dropFromLastBatch(uris)
+            // Purge removes items from MediaStore for good; drop the shared cache so Home and
+            // Stats recompute from fresh data rather than a stale count.
+            MediaCache.invalidate()
             load()
         }
     }
