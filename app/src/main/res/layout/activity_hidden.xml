@@ -81,7 +81,7 @@
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Hide again" />
+            android:text="Unhide this month" />
     </LinearLayout>
 
     <FrameLayout

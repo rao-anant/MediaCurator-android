@@ -53,8 +53,18 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             val monthsOldest = byMonth.keys.sorted()              // "YYYY-MM" sorts chronologically
             val totalMonths  = monthsOldest.size
             val doneMonths   = monthsOldest.count { it in done }
-            val resumeKey    = monthsOldest.firstOrNull { it !in done }
+            val resumeKey    = monthsOldest.firstOrNull { it !in done }   // oldest un-curated (state driver)
             val hiddenItems  = monthsOldest.filter { it in done }.sumOf { byMonth[it] ?: 0 }
+
+            // Where "Resume" sends the gallery: the raw last-viewed month if we have one (the
+            // gallery resolves it — lands there if still visible, else the top open month, else
+            // just shows the tree), otherwise the oldest un-curated month.
+            val lastViewed = prefs.getLastViewedMonth()
+            val deepLink = lastViewed ?: resumeKey
+            // What the hero LABEL shows ("Pick up at …"): the last-viewed month only while it's
+            // still visible (exists + not hidden); otherwise the oldest un-curated month.
+            val lastViewedVisible = lastViewed != null && byMonth.containsKey(lastViewed) && lastViewed !in done
+            val labelTarget = if (lastViewedVisible) lastViewed else resumeKey
 
             hashStore.ensureLoaded()
             val dupGroups = if (hashStore.countEntries() == 0) -1 else hashStore.findDuplicateGroups().size
@@ -62,7 +72,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             // In-Trash is derived from the actual trash (ground truth) — a prefs counter would
             // drift whenever the trash changes outside our app (external restore, OS auto-purge).
             val trashed = TrashManager.get(getApplication()).listTrashed()
-            val state = buildState(media.size, totalSize, hiddenItems, totalMonths, doneMonths, resumeKey, dupGroups,
+            val state = buildState(media.size, totalSize, hiddenItems, totalMonths, doneMonths, resumeKey, labelTarget, deepLink, dupGroups,
                 trashed.size.toLong(), trashed.sumOf { it.size })
             DebugLog.i("home", "load: done media=${media.size} months=$totalMonths/$doneMonths dup=$dupGroups -> '${state.summary}'")
             _state.postValue(state)
@@ -71,7 +81,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun buildState(
         total: Int, size: Long, hidden: Int,
-        totalMonths: Int, doneMonths: Int, resumeKey: String?, dupGroups: Int,
+        totalMonths: Int, doneMonths: Int, resumeKey: String?, labelTarget: String?, deepLink: String?, dupGroups: Int,
         trashCount: Long, trashBytes: Long
     ): HomeState {
         val cShort = { n: Int -> GalleryAdapter.fmtCountShort(n) }
@@ -81,17 +91,20 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
         val pct = if (totalMonths > 0) doneMonths * 100 / totalMonths else 0
 
+        // resumeKey drives WHICH state we're in; labelTarget is the month shown in the hero,
+        // deepLink is where "Resume" sends the gallery (the gallery resolves it further).
         var title = "Continue curating"; var progress = pct; var progressLabel = "$pct% curated"
-        var caption = "Pick up at"; var resumeLabel = monthLabel(resumeKey); var button = "Resume"
+        var caption = "Pick up at"; var resumeLabel = monthLabel(labelTarget); var button = "Resume"
+        var deepLinkOut = deepLink
 
         when {
             total == 0 -> {
                 title = "No media yet"; progress = -1; progressLabel = ""
-                caption = ""; resumeLabel = "Add photos to get started"; button = "Open gallery"
+                caption = ""; resumeLabel = "Add photos to get started"; button = "Open gallery"; deepLinkOut = null
             }
             doneMonths == 0 -> {            // first run
                 title = "Start curating"; progress = -1; progressLabel = ""
-                caption = "Begin at"; resumeLabel = monthLabel(resumeKey); button = "Start"
+                caption = "Begin at"; button = "Start"
             }
             resumeKey == null -> {          // all caught up
                 title = "All caught up"; progress = 100; progressLabel = "100% curated"
@@ -110,7 +123,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                        else "${cShort(trashCount.toInt())} · ${GalleryAdapter.fmtBytes(trashBytes)}"
 
         return HomeState(summary, title, progress, progressLabel, caption, resumeLabel, button,
-            resumeKey, dupSub, hiddenSub, trashSub, trashEmpty)
+            deepLinkOut, dupSub, hiddenSub, trashSub, trashEmpty)
     }
 
     private val monthNames = arrayOf(

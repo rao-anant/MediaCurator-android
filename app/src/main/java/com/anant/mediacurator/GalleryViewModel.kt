@@ -223,10 +223,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private val expandedYears     = Collections.synchronizedSet(mutableSetOf<Int>())
     private val expandedMonths    = Collections.synchronizedSet(mutableSetOf<String>())
     private val expandedSubGroups = Collections.synchronizedSet(mutableSetOf<String>())
-    // Sub-groups the user has opened at least once. Never cleared on collapse; persisted
-    // across sessions so the "Hide Month" button reappears only after both Camera and
-    // WhatsApp have been reviewed (possibly across different launches).
-    private val seenSubGroups     = Collections.synchronizedSet(mutableSetOf<String>())
+    // "Seen" review keys for the Hide-Month gate: one per (month, sub-group, type) the user has
+    // actually viewed on screen — e.g. "2024-03:cam:video". A type counts as seen only when its
+    // sub-group is expanded WHILE that type's chip is on, so filtering a type out can't sneak
+    // past the gate. Never cleared on collapse; persisted across sessions.
+    private val seenReviewKeys    = Collections.synchronizedSet(mutableSetOf<String>())
 
     init {
         _sortMode.value = prefs.getSortMode()
@@ -237,7 +238,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         expandedYears.addAll(prefs.getExpandedYears())
         expandedMonths.addAll(prefs.getExpandedMonths())
         expandedSubGroups.addAll(prefs.getExpandedSubGroups())
-        seenSubGroups.addAll(prefs.getSeenSubGroups())
+        seenReviewKeys.addAll(prefs.getSeenReviewKeys())
         // Silently restore hidden-month state from the auto-backup if prefs are empty
         // (covers fresh install, app-data clear, reinstall after uninstall).
         checkAndAutoRestore()
@@ -304,13 +305,23 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             expandedSubGroups.remove(subKey)
         } else {
             expandedSubGroups.add(subKey)
-            if (seenSubGroups.add(subKey)) {  // first time opened — persist the "seen" state
-                prefs.saveSeenSubGroups(seenSubGroups.toSet())
-            }
+            // "Seen" marking happens at tree-build time (loadMedia below), keyed per type and
+            // gated on the chip filter — expanding alone isn't enough to count as reviewed.
         }
         prefs.saveExpandedSubGroups(expandedSubGroups.toSet())
         structuralVersion++
         loadMedia(forceRefresh = false)
+    }
+
+    /** Stable key for the Hide-Month review gate, e.g. "2024-03:cam:video". */
+    private fun reviewKey(monthKey: String, sub: String, type: MediaType): String {
+        val t = when (type) {
+            MediaType.IMAGE -> "photo"
+            MediaType.VIDEO -> "video"
+            MediaType.AUDIO -> "audio"
+            MediaType.PDF   -> "pdf"
+        }
+        return "$monthKey:$sub:$t"
     }
 
     fun setSortMode(mode: SortMode) {
@@ -481,7 +492,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 val expandedYearsSnapshot     = expandedYears.toSet()
                 val expandedMonthsSnapshot    = expandedMonths.toSet()
                 val expandedSubGroupsSnapshot = expandedSubGroups.toSet()
-                val seenSubGroupsSnapshot     = seenSubGroups.toSet()
+                // Unfiltered (all-types, chip-independent) items per month — drives the Hide-Month
+                // gate's "what types actually exist" check so turning a chip off can't reveal the
+                // button early. allVisibleFull is filteredMedia (non-deleted, all types) grouped.
+                val fullMonthItems = allVisibleFull.associate { it.key to it.items }
+                var seenChanged = false
 
                 val treeItems = ArrayList<GalleryItem>()
                 for ((year, months) in yearToMonths) {
@@ -515,18 +530,34 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                             val isMonthExpanded = expandedMonthsSnapshot.contains(group.key)
                             treeItems.add(GalleryItem.Header(group.key, group.label, monthItemCount, monthBytes, isMonthExpanded, monthPhotos, monthVideos, monthPdfs, currentVersion, monthAudios))
                             if (isMonthExpanded) {
+                                // Chip-filtered (on-screen) items — what's actually shown/marked seen.
                                 val waItems  = group.items.filter { it.isWhatsApp }
                                 val camItems = group.items.filter { !it.isWhatsApp }
+                                // Unfiltered presence — what the gate requires the user to review.
+                                val fullItems = fullMonthItems[group.key] ?: group.items
+                                val fullCam   = fullItems.filter { !it.isWhatsApp }
+                                val fullWa    = fullItems.filter { it.isWhatsApp }
 
-                                val showHideButton: Boolean
+                                // Mark every type currently on screen in [sub] as reviewed. Items are
+                                // only present here when the container is expanded AND the type's chip
+                                // is on, so this precisely records "viewed with that chip enabled".
+                                fun markSeen(sub: String, shown: List<MediaItem>) {
+                                    shown.asSequence().map { it.type }.distinct().forEach { t ->
+                                        if (seenReviewKeys.add(reviewKey(group.key, sub, t))) seenChanged = true
+                                    }
+                                }
+                                // Required keys come from the UNFILTERED presence, so a hidden chip
+                                // leaves its key unsatisfied and the button stays hidden.
+                                fun requiredKeys(sub: String, full: List<MediaItem>) =
+                                    full.asSequence().map { it.type }.distinct().map { reviewKey(group.key, sub, it) }
+
                                 if (waItems.isEmpty()) {
-                                    // No WhatsApp items — flat layout, show items directly
+                                    // Flat layout (no WhatsApp items in the filtered set). All shown
+                                    // items belong to the implicit "cam" group.
                                     group.items.forEachIndexed { index, mediaItem ->
                                         treeItems.add(GalleryItem.Media(mediaItem, group.key, index, null, currentVersion))
                                     }
-                                    // Flat month: no sub-groups to gate on — expanding the month
-                                    // IS the review, so the button is available right away.
-                                    showHideButton = true
+                                    markSeen("cam", group.items)
                                 } else {
                                     val camKey = "${group.key}:cam"
                                     val waKey  = "${group.key}:wa"
@@ -550,6 +581,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                                             camItems.forEachIndexed { index, mediaItem ->
                                                 treeItems.add(GalleryItem.Media(mediaItem, group.key, index, null, currentVersion))
                                             }
+                                            markSeen("cam", camItems)
                                         }
                                     }
 
@@ -569,17 +601,23 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                                         waItems.forEachIndexed { index, mediaItem ->
                                             treeItems.add(GalleryItem.Media(mediaItem, group.key, index, null, currentVersion))
                                         }
+                                        markSeen("wa", waItems)
                                     }
-                                    // Both sub-groups must have been opened at least once this session
-                                    val camSeen = camItems.isEmpty() || seenSubGroupsSnapshot.contains(camKey)
-                                    val waSeen  = seenSubGroupsSnapshot.contains(waKey)
-                                    showHideButton = camSeen && waSeen
                                 }
+
+                                // Gate: every (sub-group × type) that actually EXISTS in the month
+                                // (ignoring the current chip filter) must have been seen. Hidden
+                                // types / chips therefore block the button until viewed with the
+                                // chip on. Sub-groups/types not present in the month aren't required.
+                                val required = requiredKeys("cam", fullCam) + requiredKeys("wa", fullWa)
+                                val showHideButton = required.all { seenReviewKeys.contains(it) }
                                 treeItems.add(GalleryItem.Footer(group.key, currentVersion, showHideButton))
                             }
                         }
                     }
                 }
+                // Persist any newly-seen review keys once per build (not per key).
+                if (seenChanged) prefs.saveSeenReviewKeys(seenReviewKeys.toSet())
                 galleryItems = treeItems
                 // Viewer swipes through exactly what the grid renders — i.e. items in EXPANDED
                 // months/sub-groups only.  Using visibleGroups.flatMap here instead would let

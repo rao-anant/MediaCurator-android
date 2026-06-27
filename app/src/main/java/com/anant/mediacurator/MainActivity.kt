@@ -275,6 +275,15 @@ class MainActivity : AppCompatActivity() {
         viewModel.loadMedia(forceRefresh = true)
     }
 
+    override fun onPause() {
+        super.onPause()
+        // Remember the month at the top of the viewport so Home's "Resume" can bring the user
+        // back here. Saved in onPause (not onStop) because it must land BEFORE Home's onStart →
+        // load() reads it — otherwise Home would compute the resume target from a stale value.
+        // Null in flat (size) mode or before the tree exists — skip then.
+        currentVisibleMonthKey()?.let { viewModel.prefs.setLastViewedMonth(it) }
+    }
+
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
         when {
@@ -473,15 +482,20 @@ class MainActivity : AppCompatActivity() {
             binding.recyclerView.post { updateStickyHeader() }
             tryShowOnboarding()
 
-            // Home "Resume" deep-link: scroll to the target month once its header is in the
-            // list, then clear (so later startup loads don't keep yanking the scroll).
+            // Home "Resume" deep-link: land on the target month once the tree is built. Resolution:
+            //   1. the target month (last-viewed, if still visible) — scroll to it;
+            //   2. else the topmost OPEN (expanded) month — scroll to it;
+            //   3. else nothing — just show the tree from the top.
+            // One-shot: cleared after the first real (non-empty) load so later refreshes don't yank.
             pendingResumeKey?.let { key ->
-                val pos = items.indexOfFirst { it is GalleryItem.Header && it.monthKey == key }
+                if (items.none { it is GalleryItem.Header }) return@let   // tree not ready yet
+                var pos = items.indexOfFirst { it is GalleryItem.Header && it.monthKey == key }
+                if (pos < 0) pos = items.indexOfFirst { it is GalleryItem.Header && (it as GalleryItem.Header).isExpanded }
                 if (pos >= 0) {
                     (binding.recyclerView.layoutManager as? GridLayoutManager)?.scrollToPositionWithOffset(pos, 0)
                     binding.appBarLayout.setExpanded(true, false)
-                    pendingResumeKey = null
                 }
+                pendingResumeKey = null
             }
         }
 

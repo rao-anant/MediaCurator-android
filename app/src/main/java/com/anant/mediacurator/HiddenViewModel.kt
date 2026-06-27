@@ -12,9 +12,9 @@ import kotlinx.coroutines.withContext
 /**
  * Backing for the dedicated [HiddenActivity] — a sparse screen for bringing hidden months back.
  *
- * Option A semantics: selecting a hidden month UNHIDES it immediately (it rejoins the gallery)
- * and displays it here for one last review. Re-hiding it puts it back; leaving without re-hiding
- * keeps it unhidden (it's simply gone from the dropdowns on the next visit).
+ * Preview semantics: selecting a hidden month shows its contents but leaves it HIDDEN. Months
+ * stay hidden until the user explicitly taps "Unhide this month". No silent unhides — switching
+ * months or leaving the screen never changes curation.
  */
 class HiddenViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -44,22 +44,27 @@ class HiddenViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    /** Unhide [year]/[month] and show its items for review. */
+    /** Month key ("YYYY-MM") of the most recently hidden month, or null — for auto-reopen. */
+    fun lastHiddenMonthKey(): String? = prefs.getLastHiddenMonth()
+
+    /**
+     * Preview [year]/[month] — show its items WITHOUT unhiding it. The month stays hidden (and in
+     * the dropdowns) until the user explicitly taps "Unhide this month" ([unhideShown]). This is a
+     * read-only review, so switching months or leaving the screen never silently changes curation.
+     */
     fun selectMonth(year: Int, month: Int) {
         val group = _hiddenMonths.value?.find { it.year == year && it.month == month } ?: return
-        prefs.unmarkMonthDone(year, month)
         _shown.value = Shown(
             year, month, group.label,
             group.items.mapIndexed { i, item -> GalleryItem.Media(item, group.key, i) }
         )
-        recomputeHidden()   // now excludes the month → it drops out of the dropdowns
     }
 
-    /** Re-hide the month currently being shown. */
-    fun hideShown() {
+    /** Explicitly unhide the month currently being previewed — the only way a month leaves Hidden. */
+    fun unhideShown() {
         val s = _shown.value ?: return
-        prefs.markMonthDone(s.year, s.month)
+        prefs.unmarkMonthDone(s.year, s.month)
         _shown.value = null
-        recomputeHidden()
+        recomputeHidden()   // now excludes the month → it drops out of the dropdowns
     }
 }

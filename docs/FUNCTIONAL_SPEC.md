@@ -87,8 +87,11 @@ Photos permission maps to `PHPhotoLibrary` authorization (full vs limited — ha
 - **Library summary** line (e.g. counts/size overview).
 - **Hero card** — teaches the concept and resumes work:
   - Title + a "resume" label + caption + an action button (e.g. "Start curating" /
-    "Continue curating"). Tapping the card or button opens the Gallery scrolled to the next
-    un-curated month (deep-link by month key).
+    "Continue curating"). Tapping the card or button opens the Gallery at the **resume target**.
+  - **Resume target** = the **last month the user was viewing** when they left the gallery, if
+    that month is still visible (exists + not hidden); otherwise the oldest un-curated month. The
+    hero's "Pick up at <month>" label reflects this. The gallery refines it further on open
+    (see §3 "Landing position"). This is "pick up where you left off."
   - Optional progress bar with a percentage label when curation progress is known.
 - **Cards** (each: icon, title, subtitle hint):
   - **Free up space** — "Biggest files first" → Gallery in Largest-overall sort.
@@ -122,14 +125,26 @@ tree, with a sticky header, filter chips, sort, search, and selection actions.
   (see visibility rule below) + a thin divider.
 
 ### "Hide Month" button visibility rule  ⚠ important
-The footer's Hide button only appears once the user has actually **reviewed** the month:
-- **Sub-grouped month:** button shows only after **both** "Camera & Others" **and** "WhatsApp"
-  sub-groups have each been **expanded at least once**. (If a month has only WhatsApp and no
-  camera items, the camera condition is treated as already satisfied.)
-- This "seen" state is **persisted across app launches** (so opening Camera in one session and
-  WhatsApp in a later session still satisfies it).
-- **Flat month** (no WhatsApp items): there are no sub-groups to gate on, so expanding the month
-  *is* the review — the Hide button is available immediately.
+The footer's Hide button only appears once the user has actually **reviewed everything in the
+month** — every media type, in every sub-group. The gate is **per (sub-group × type)**:
+
+- A type counts as **"seen"** for a sub-group only when that sub-group is **expanded while that
+  type's chip is on** (so the items are actually on screen). Expanding Camera with the Videos
+  chip *off* does **not** count as having reviewed the videos.
+- The button appears only when, for **every (sub-group, type) that actually exists in the month**
+  — computed from the full library, **ignoring the current chip filter** — the user has seen it.
+  So turning a chip off can never reveal the button early; the user must enable each type and
+  view it in each sub-group that contains it.
+- "Seen" keys are per `(<month>:<sub>:<type>)`, e.g. `2024-03:cam:video`, and are **persisted
+  across launches** (review Camera/photos in one session and WhatsApp/videos in another and it
+  still adds up).
+- A (sub-group, type) combination that doesn't exist in the month is simply not required.
+- **Flat month** (no WhatsApp items): the single implicit group still gates per type — e.g. a
+  photos+videos month needs both chips on and the items viewed before Hide appears.
+
+Examples: a month of photos only → expand it (photo chip on) and Hide appears. A month with
+Camera photos + Camera videos + WhatsApp photos → you must view Camera with both photo and
+video chips on **and** open WhatsApp with the photo chip on before Hide appears.
 
 ### Hiding a month
 Tapping "Hide Month" immediately hides it and shows a **Snackbar**: *"{Month} hidden from this
@@ -152,6 +167,16 @@ A **sort chip** (button) shows the current sort; tapping opens a popup with sing
   date badge; **no sticky header** in this mode.
 - **Largest first (per month)** (SIZE_WITHIN_MONTH)
 - **Most items first** (COUNT_PER_MONTH)
+
+### Landing position (Resume / re-entry)
+When the gallery opens via Home's Resume/Start, it lands using these rules, in order:
+1. **The last month you were viewing** (persisted when you leave the gallery) — if it's still a
+   visible month, scroll to it.
+2. Else **the topmost open (expanded) month** — scroll to it.
+3. Else **just show the tree** from the top (no forced scroll).
+"All caught up" is preserved (the hero still says so when every month is curated). The last-viewed
+month is saved as the top-of-viewport month on leave (skipped in flat Largest-overall mode). Net
+effect: leave mid-library, come back, and you're where you left off — even across Home round-trips.
 
 ### Sticky header
 As the user scrolls, a sticky overlay shows the current Year (always), Month (when scrolled
@@ -251,29 +276,34 @@ Files-app documents). Flag this divergence.
 
 ## 5. HIDDEN MONTHS
 
-Brings hidden months back. Sparse screen: two dropdowns + a review grid.
+A **preview** screen for hidden months. Sparse: two dropdowns + a review grid. **Previewing a
+month never unhides it** — months stay hidden until the user explicitly taps "Unhide this month".
+There are **no confirmation dialogs**: switching months or leaving the screen changes nothing.
 
 ### Layout & flow
 - Two dropdown boxes: **Year** and **Month**. Disabled until data loads.
-- **Nothing is shown until a month is picked.** Empty-state text:
-  - If hidden months exist: *"Pick a year and month above to bring it back."*
+- **Auto-preview the last-hidden month:** on first entry, if the most recently hidden month is
+  still hidden, the screen automatically previews it (shown expanded, but still hidden), so the
+  user lands on what they last curated instead of a blank screen. The most-recent-hide is
+  recorded whenever a month is hidden (gallery footer Hide button) and cleared if that month is
+  later unhidden. Because previewing keeps the month hidden, this is **reliable on every visit**
+  (the month doesn't vanish after a glance). One-shot per visit — it doesn't fight manual
+  navigation afterward.
+- If there's no recorded/still-hidden last month, **nothing is shown until a month is picked.**
+  Empty-state text:
+  - If hidden months exist: *"Pick a year and month above to view it."*
   - If none: *"You haven't hidden any months yet. Months you hide will appear here to bring
     back."*
 - Year dropdown shows `year (count)`. Picking a year populates the Month dropdown
   (`MonthName · N items`) and auto-opens it.
-- **Picking a month UNHIDES it immediately** (Option A) and shows its items in a 3-column grid.
-  A **"shown bar"** appears: *"{Month} · restored"*. A **"Hide again"** button is available.
+- **Picking a month PREVIEWS it** — shows its items in a 3-column grid while it stays hidden. A
+  **"shown bar"** appears: *"{Month} · still hidden"* with an **"Unhide this month"** button.
 
-### The "keep unhidden?" guard
-If a month is shown (unhidden, not yet re-hidden) and the user tries to **leave the screen**
-(back/up) **or pick a different month**, a dialog appears:
-- Title **"Keep '{Month}' unhidden?"**
-- Body: "You unhid it but didn't hide it again. Hide it again to keep it curated, or keep it
-  unhidden in your gallery."
-- **Hide again** (default/positive) re-hides then proceeds; **Keep unhidden** proceeds without
-  re-hiding. Dismissing cancels the action.
-- The explicit **"Hide again"** button re-hides immediately with no extra prompt.
-- If the shown month is re-picked (same one), it's a no-op.
+### Unhiding
+- **"Unhide this month"** is the *only* action that unhides — it brings the previewed month back
+  to the gallery, drops it from the dropdowns, and clears the "last hidden" pointer. No dialog.
+- Switching to another month, or leaving the screen (back/up), simply changes the preview /
+  exits — the hidden set is untouched.
 
 ### Selection actions (same engine as gallery)
 Long-press → selection bar with **Share / Move / Delete** (same semantics as §3, including

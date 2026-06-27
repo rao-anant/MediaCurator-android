@@ -28,9 +28,9 @@ import kotlinx.coroutines.withContext
 /**
  * Sparse, dedicated screen for bringing hidden months back (Home → "Hidden months").
  *
- * Nothing is shown until the user picks a month. Picking it UNHIDES it immediately (Option A)
- * and displays it for review; "Hide again" puts it back. Leaving/switching prompts so a
- * forgotten re-hide doesn't silently lose curation.
+ * On open it auto-previews the most recently hidden month (else nothing until the user picks one).
+ * Previewing shows a month's contents but leaves it HIDDEN — months stay hidden until the user
+ * explicitly taps "Unhide this month". No confirmation dialogs; switching/leaving changes nothing.
  *
  * Two view models: [hiddenVm] owns the dropdown / unhide bookkeeping; [galleryVm] is the
  * grid + Share/Move/Delete engine. The grid is driven from galleryVm.flatMediaItems via
@@ -47,6 +47,10 @@ class HiddenActivity : AppCompatActivity() {
     private var yearList: List<Int> = emptyList()
     private var monthsInSelectedYear: List<MonthGroup> = emptyList()
     private var selectedYear: Int? = null
+    // One-shot: on first open, auto-preview the most recently hidden month so the user can see
+    // what they last curated without having to remember which month it was. Preview keeps it
+    // hidden, so this stays reliable across visits (the month doesn't vanish after a glance).
+    private var autoShowAttempted = false
 
     // Pending move state (mirrors MainActivity's move flow).
     private var pendingMoveItems: List<MediaItem>? = null
@@ -103,16 +107,11 @@ class HiddenActivity : AppCompatActivity() {
         }
         binding.autoMonth.setOnItemClickListener { _, _, position, _ ->
             val group = monthsInSelectedYear.getOrNull(position) ?: return@setOnItemClickListener
-            val cur = hiddenVm.shown.value
-            if (cur != null && cur.year == group.year && cur.month == group.month) {
-                binding.autoMonth.setText("", false); return@setOnItemClickListener
-            }
-            confirmShownThen {
-                hiddenVm.selectMonth(group.year, group.month)
-                binding.autoMonth.setText("", false)
-            }
+            // Preview the month — it stays hidden. No guard: switching months changes nothing.
+            hiddenVm.selectMonth(group.year, group.month)
+            binding.autoMonth.setText("", false)
         }
-        binding.btnHideAgain.setOnClickListener { confirmHideAgain() }
+        binding.btnHideAgain.setOnClickListener { hiddenVm.unhideShown() }
 
         binding.btnShareSelected.setOnClickListener {
             val sel = adapter.getSelectedItems()
@@ -160,37 +159,27 @@ class HiddenActivity : AppCompatActivity() {
         hiddenVm.load()
     }
 
-    override fun onSupportNavigateUp(): Boolean { attemptExit(); return true }
+    override fun onSupportNavigateUp(): Boolean { finish(); return true }
 
-    // ── Leaving / switching confirmation ─────────────────────────────────────────
-
-    private fun attemptExit() = confirmShownThen { finish() }
-
-    private fun confirmHideAgain() {
-        // The explicit "Hide again" button: re-hide immediately, no extra prompt.
-        hiddenVm.hideShown()
-    }
-
-    /**
-     * If a month is shown (it was unhidden the moment it was picked) and not yet re-hidden,
-     * ask whether to hide it again or keep it unhidden, THEN run [onResolved]. Defaults to
-     * "Hide again" so a forgotten re-hide doesn't quietly undo their curation. No prompt when
-     * nothing is shown; dismissing cancels.
-     */
-    private fun confirmShownThen(onResolved: () -> Unit) {
-        val s = hiddenVm.shown.value
-        if (s == null) { onResolved(); return }
-        AlertDialog.Builder(this)
-            .setTitle("Keep \"${s.label}\" unhidden?")
-            .setMessage("You unhid it but didn't hide it again. Hide it again to keep it curated, or keep it unhidden in your gallery.")
-            .setPositiveButton("Hide again") { _, _ -> hiddenVm.hideShown(); onResolved() }
-            .setNegativeButton("Keep unhidden") { _, _ -> onResolved() }
-            .show()
-    }
+    // Preview is read-only — leaving changes nothing, so no confirmation is needed.
+    private fun attemptExit() = finish()
 
     // ── Pickers ──────────────────────────────────────────────────────────────────
 
     private fun renderPickers(groups: List<MonthGroup>) {
+        // On first open, auto-preview the most recently hidden month (if it's still hidden), so the
+        // user lands on what they last curated instead of a blank screen. One-shot — afterwards we
+        // don't fight manual navigation. Preview keeps the month hidden, so it stays in the list/
+        // dropdowns below (we fall through rather than returning).
+        if (!autoShowAttempted && hiddenVm.shown.value == null && groups.isNotEmpty()) {
+            autoShowAttempted = true
+            val target = groups.find { it.key == hiddenVm.lastHiddenMonthKey() }
+            if (target != null) {
+                selectedYear = target.year
+                hiddenVm.selectMonth(target.year, target.month)
+            }
+        }
+
         binding.menuYear.isEnabled = groups.isNotEmpty()
 
         yearList = groups.map { it.year }.distinct().sortedDescending()
@@ -216,7 +205,7 @@ class HiddenActivity : AppCompatActivity() {
         if (hiddenVm.shown.value == null) {
             binding.tvEmpty.isVisible = true
             binding.tvEmpty.text = if (groups.isNotEmpty())
-                "Pick a year and month above\nto bring it back."
+                "Pick a year and month above\nto view it."
             else
                 "You haven't hidden any months yet.\nMonths you hide will appear here to bring back."
         }
@@ -238,7 +227,7 @@ class HiddenActivity : AppCompatActivity() {
         exitSelectionMode()
         if (shown != null) {
             binding.shownBar.isVisible = true
-            binding.tvShownLabel.text = "${shown.label} · restored"
+            binding.tvShownLabel.text = "${shown.label} · still hidden"
             binding.tvEmpty.isVisible = false
             galleryVm.loadExplicit(shown.items.map { it.mediaItem.id }.toLongArray())
         } else {
@@ -246,7 +235,7 @@ class HiddenActivity : AppCompatActivity() {
             adapter.submitList(emptyList())
             val hasHidden = (hiddenVm.hiddenMonths.value?.isNotEmpty()) == true
             binding.tvEmpty.text = if (hasHidden)
-                "Pick a year and month above\nto bring it back."
+                "Pick a year and month above\nto view it."
             else
                 "You haven't hidden any months yet.\nMonths you hide will appear here to bring back."
             binding.tvEmpty.isVisible = true

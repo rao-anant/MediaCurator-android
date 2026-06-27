@@ -12,14 +12,28 @@ class PreferencesManager(context: Context) {
     fun markMonthDone(year: Int, month: Int) {
         val current = getDoneMonths().toMutableSet()
         current.add(monthKey(year, month))
-        prefs.edit().putStringSet(KEY_DONE_MONTHS, current).apply()
+        prefs.edit()
+            .putStringSet(KEY_DONE_MONTHS, current)
+            .putString(KEY_LAST_HIDDEN_MONTH, monthKey(year, month))   // remember the most recent hide
+            .apply()
     }
 
     fun unmarkMonthDone(year: Int, month: Int) {
         val current = getDoneMonths().toMutableSet()
         current.remove(monthKey(year, month))
-        prefs.edit().putStringSet(KEY_DONE_MONTHS, current).apply()
+        val editor = prefs.edit().putStringSet(KEY_DONE_MONTHS, current)
+        // If we just unhid the month we were pointing at, forget it so the Hidden screen
+        // doesn't try to auto-reopen a month that's no longer hidden.
+        if (getLastHiddenMonth() == monthKey(year, month)) editor.remove(KEY_LAST_HIDDEN_MONTH)
+        editor.apply()
     }
+
+    /** Month key ("YYYY-MM") of the most recently hidden month, or null. */
+    fun getLastHiddenMonth(): String? = prefs.getString(KEY_LAST_HIDDEN_MONTH, null)
+
+    /** Month key ("YYYY-MM") at the top of the gallery when the user last left it — for Resume. */
+    fun setLastViewedMonth(key: String) { prefs.edit().putString(KEY_LAST_VIEWED_MONTH, key).apply() }
+    fun getLastViewedMonth(): String? = prefs.getString(KEY_LAST_VIEWED_MONTH, null)
 
     fun getDoneMonths(): Set<String> =
         prefs.getStringSet(KEY_DONE_MONTHS, emptySet()) ?: emptySet()
@@ -62,11 +76,15 @@ class PreferencesManager(context: Context) {
     fun getExpandedSubGroups(): Set<String> =
         prefs.getStringSet(KEY_EXPANDED_SUBGROUPS, emptySet()) ?: emptySet()
 
-    fun saveSeenSubGroups(subGroups: Set<String>) {
-        prefs.edit().putStringSet(KEY_SEEN_SUBGROUPS, subGroups).apply()
+    /**
+     * "Seen" review keys for the Hide-Month gate, one per (month, sub-group, type) the user has
+     * actually viewed on screen — e.g. "2024-03:cam:video".  See GalleryViewModel for the rule.
+     */
+    fun saveSeenReviewKeys(keys: Set<String>) {
+        prefs.edit().putStringSet(KEY_SEEN_REVIEW_KEYS, keys).apply()
     }
-    fun getSeenSubGroups(): Set<String> =
-        prefs.getStringSet(KEY_SEEN_SUBGROUPS, emptySet()) ?: emptySet()
+    fun getSeenReviewKeys(): Set<String> =
+        prefs.getStringSet(KEY_SEEN_REVIEW_KEYS, emptySet()) ?: emptySet()
 
     fun saveIncludePhoto(include: Boolean) {
         prefs.edit().putBoolean(KEY_INCLUDE_PHOTO, include).apply()
@@ -152,6 +170,8 @@ class PreferencesManager(context: Context) {
     companion object {
         private const val PREFS_NAME = "photo_curator_prefs"
         private const val KEY_DONE_MONTHS = "done_months"
+        private const val KEY_LAST_HIDDEN_MONTH = "last_hidden_month"
+        private const val KEY_LAST_VIEWED_MONTH = "last_viewed_month"
         private const val KEY_SORT_ASC = "sort_ascending"   // kept for migration read
         private const val KEY_SORT_MODE = "sort_mode"
         private const val KEY_INCLUDE_PHOTO = "include_photo"
@@ -161,7 +181,9 @@ class PreferencesManager(context: Context) {
         private const val KEY_EXPANDED_YEARS       = "expanded_years"
         private const val KEY_EXPANDED_MONTHS      = "expanded_months"
         private const val KEY_EXPANDED_SUBGROUPS   = "expanded_subgroups"
-        private const val KEY_SEEN_SUBGROUPS       = "seen_subgroups"
+        // Per-(month, sub-group, type) review keys. Replaces the older coarse "seen_subgroups"
+        // set (which only tracked whether a sub-group was expanded, ignoring chip filters).
+        private const val KEY_SEEN_REVIEW_KEYS     = "seen_review_keys"
         private const val KEY_PDF_CONTENT_SEARCH        = "pdf_content_search"
         private const val KEY_PHOTO_DUPLICATE_DETECTION = "photo_duplicate_detection"
         private const val KEY_SEEN_ONBOARDING           = "seen_onboarding"
