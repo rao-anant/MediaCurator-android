@@ -2,6 +2,11 @@
 .gradle/
 build/
 app/build/
+app/release/
+
+# Generated test media / stray debug screenshots in repo root
+testmedia/
+/*.png
 
 # Signing — NEVER commit these
 keystore.properties

@@ -308,6 +308,108 @@
         android:textColor="@color/on_surface_variant"
         android:visibility="gone" />
 
+    <!-- Pinned "Hide month" bar — appears when the month in view has been fully reviewed,
+         so the action is always reachable without scrolling to the bottom of the month. -->
+    <LinearLayout
+        android:id="@+id/hideMonthBarContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="16dp"
+        android:elevation="6dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/coachHideTip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:background="@drawable/coach_bubble_bg"
+            android:padding="12dp"
+            android:text="You've reviewed this month — tap to hide and remove it from this app. Your files are never deleted; they stay in your phone's gallery. Find it again under Hidden months."
+            android:textColor="@color/on_surface"
+            android:textSize="13sp"
+            android:lineSpacingExtra="2dp"
+            android:visibility="gone" />
+
+        <!-- Teaser state: shown (muted) while a reviewed month hasn't been scrolled to its end,
+             nudging the user down to where Hide lives. Becomes btnHideMonthBar at the end. -->
+        <LinearLayout
+            android:id="@+id/teaserHideHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/teaser_bar_bg"
+            android:minHeight="48dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="6dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/teaserChevrons"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:layout_marginEnd="14dp">
+                <TextView android:id="@+id/chev1"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="▼" android:textSize="15sp" android:textStyle="bold"
+                    android:includeFontPadding="false" android:lineSpacingMultiplier="0.85"
+                    android:textColor="@color/hide_button_yellow" />
+                <TextView android:id="@+id/chev2"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="▼" android:textSize="15sp" android:textStyle="bold"
+                    android:includeFontPadding="false" android:lineSpacingMultiplier="0.85"
+                    android:textColor="@color/hide_button_yellow" />
+                <TextView android:id="@+id/chev3"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="▼" android:textSize="15sp" android:textStyle="bold"
+                    android:includeFontPadding="false" android:lineSpacingMultiplier="0.85"
+                    android:textColor="@color/hide_button_yellow" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvTeaserText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Delete junk as you scroll back and forth — hide the month at the end"
+                android:textColor="@color/hide_button_yellow"
+                android:textStyle="bold"
+                android:textSize="14sp"
+                android:lineSpacingExtra="2dp" />
+
+            <ImageButton
+                android:id="@+id/btnTeaserDismiss"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_close"
+                android:tint="@color/on_surface_variant"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Dismiss hint" />
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnHideMonthBar"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Hide month"
+            android:textColor="@android:color/white"
+            app:icon="@drawable/ic_check"
+            app:iconTint="@android:color/white"
+            app:backgroundTint="@color/primary"
+            app:cornerRadius="24dp" />
+    </LinearLayout>
+
     <LinearLayout
         android:id="@+id/selectionBar"
         android:layout_width="match_parent"

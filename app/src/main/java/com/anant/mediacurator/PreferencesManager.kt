@@ -44,6 +44,18 @@ class PreferencesManager(context: Context) {
 
     fun isMonthDone(year: Int, month: Int) = getDoneMonths().contains(monthKey(year, month))
 
+    /**
+     * TESTING: wipe all curation progress — hidden months, per-type "seen" marks, walked-through
+     * markers, expansion state, and the hint/onboarding flags. Leaves unrelated settings (PDF
+     * search, lifetime cleaned-up stats) untouched. Downloads backups are deleted separately by the
+     * caller, otherwise hidden-months / onboarding would re-restore on next launch.
+     */
+    fun resetCurationProgress() {
+        prefs.edit().apply {
+            CURATION_PROGRESS_KEYS.forEach { remove(it) }
+        }.apply()
+    }
+
     fun saveSortMode(mode: SortMode) {
         prefs.edit().putString(KEY_SORT_MODE, mode.name).apply()
     }
@@ -156,10 +168,50 @@ class PreferencesManager(context: Context) {
     }
     fun clearLastDeletedBatch() { prefs.edit().remove(KEY_LAST_BATCH).apply() }
 
-    /** First-run onboarding: true once the user has seen the "how curation works" intro. */
-    fun hasSeenOnboarding(): Boolean = prefs.getBoolean(KEY_SEEN_ONBOARDING, false)
-    fun setSeenOnboarding() {
+    /**
+     * The first-run demo auto-plays (mandatory) on every app launch UNTIL the user ticks
+     * "Don't show again". This flag is that opt-out. Cleared on data-clear / reinstall, so a fresh
+     * install shows the demo again.
+     */
+    fun isDemoDisabled(): Boolean = prefs.getBoolean(KEY_SEEN_ONBOARDING, false)
+    fun setDemoDisabled() {
         prefs.edit().putBoolean(KEY_SEEN_ONBOARDING, true).apply()
+    }
+
+    /** Coach-mark on the pinned "Hide month" bar: shown once, the first time the bar appears. */
+    fun hasSeenHideCoach(): Boolean = prefs.getBoolean(KEY_SEEN_HIDE_COACH, false)
+    fun setSeenHideCoach() {
+        prefs.edit().putBoolean(KEY_SEEN_HIDE_COACH, true).apply()
+    }
+
+    /**
+     * "Scroll through to hide" teaser hint: retired once the user hides their first month (they've
+     * understood the loop) or explicitly dismisses it. After that, long reviewed months simply show
+     * the live Hide bar at the end with no teaser.
+     */
+    fun isScrollHintRetired(): Boolean = prefs.getBoolean(KEY_SCROLL_HINT_RETIRED, false)
+    fun setScrollHintRetired() {
+        prefs.edit().putBoolean(KEY_SCROLL_HINT_RETIRED, true).apply()
+    }
+
+    /**
+     * Months the user has already fully reviewed AND scrolled through (footer reached), stored with
+     * the month's full item count. On a later visit with the same count (no new photos), the Hide
+     * bar is offered immediately without forcing another scroll. A changed count invalidates it.
+     */
+    fun setMonthWalked(monthKey: String, count: Int) {
+        val s = prefs.getStringSet(KEY_WALKED_MONTHS, emptySet())!!.toMutableSet()
+        s.removeAll { it.substringBeforeLast(':') == monthKey }   // drop any stale count for this month
+        s.add("$monthKey:$count")
+        prefs.edit().putStringSet(KEY_WALKED_MONTHS, s).apply()
+    }
+    fun isMonthWalked(monthKey: String, count: Int): Boolean {
+        val entry = prefs.getStringSet(KEY_WALKED_MONTHS, emptySet())!!
+            .firstOrNull { it.substringBeforeLast(':') == monthKey } ?: return false
+        val walkedCount = entry.substringAfterLast(':').toIntOrNull() ?: return false
+        // Same or fewer items (e.g. the user deleted some) is still "fully seen"; only an INCREASE
+        // (new photos added) re-requires the walk-through. Rule lives in [WalkedMonthRule].
+        return WalkedMonthRule.stillWalked(count, walkedCount)
     }
 
     fun monthKey(year: Int, month: Int): String {
@@ -187,8 +239,32 @@ class PreferencesManager(context: Context) {
         private const val KEY_PDF_CONTENT_SEARCH        = "pdf_content_search"
         private const val KEY_PHOTO_DUPLICATE_DETECTION = "photo_duplicate_detection"
         private const val KEY_SEEN_ONBOARDING           = "seen_onboarding"
+        private const val KEY_SEEN_HIDE_COACH           = "seen_hide_coach"
+        private const val KEY_SCROLL_HINT_RETIRED       = "scroll_hint_retired"
+        private const val KEY_WALKED_MONTHS             = "walked_months"
         private const val KEY_LAST_BATCH                 = "last_deleted_batch"
         private const val KEY_ALL_FILES_PROMPT_SHOWN    = "all_files_prompt_shown"
         private const val KEY_HIDDEN_RESTORE_OFFERED     = "hidden_restore_offered"
+
+        /**
+         * Every key wiped by [resetCurationProgress] — hidden months, reviewed/walked markers,
+         * expansion state, and the hint/onboarding flags. Kept as a list (not inline in the reset
+         * body) so a regression test can assert the reset covers exactly these. NOT included on
+         * purpose: sort mode, type filters, PDF/duplicate toggles, all-files/hidden-restore prompt
+         * flags, and the last-deleted batch — those are unrelated settings.
+         */
+        val CURATION_PROGRESS_KEYS: List<String> = listOf(
+            KEY_DONE_MONTHS,
+            KEY_SEEN_REVIEW_KEYS,
+            KEY_WALKED_MONTHS,
+            KEY_SCROLL_HINT_RETIRED,
+            KEY_SEEN_HIDE_COACH,
+            KEY_SEEN_ONBOARDING,
+            KEY_LAST_HIDDEN_MONTH,
+            KEY_LAST_VIEWED_MONTH,
+            KEY_EXPANDED_YEARS,
+            KEY_EXPANDED_MONTHS,
+            KEY_EXPANDED_SUBGROUPS,
+        )
     }
 }

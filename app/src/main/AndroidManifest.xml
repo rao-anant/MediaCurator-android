@@ -45,5 +45,7 @@
             android:parentActivityName=".HomeActivity" />
         <activity android:name=".TrashActivity" android:exported="false"
             android:parentActivityName=".HomeActivity" />
+        <activity android:name=".OnboardingActivity" android:exported="false"
+            android:parentActivityName=".MainActivity" />
     </application>
 </manifest>

@@ -298,7 +298,10 @@ class GalleryAdapter(
         private val btnHide: MaterialButton = itemView.findViewById(R.id.btnHideMonthFooter)
         
         fun bind(footer: GalleryItem.Footer) {
-            btnHide.visibility = if (!selectionMode && footer.showHideButton) View.VISIBLE else View.GONE
+            // The in-list button is superseded by MainActivity's pinned "Hide month" bar, which is
+            // reachable without scrolling to the month's end. Footer is kept for the divider/spacing;
+            // its showHideButton flag still drives the pinned bar's eligibility.
+            btnHide.visibility = View.GONE
             btnHide.setOnClickListener {
                 val parts = footer.monthKey.split("-")
                 if (parts.size == 2) {

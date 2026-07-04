@@ -18,7 +18,7 @@ class HelpActivity : AppCompatActivity() {
         Feature(R.drawable.ic_sort, "Browse, filter & sort",
             "Photos, videos, audio and PDFs are grouped by year and month. Tap the type cards to filter; tap the sort chip to reorder (oldest, newest, largest…)."),
         Feature(R.drawable.ic_home_hidden, "Hide a month",
-            "Done reviewing a month? Hide it — it leaves the app but stays in your phone's gallery. Unhide it anytime from the Hidden months screen."),
+            "Done reviewing a month? Hide it — it leaves this app, but your files are never deleted and stay in your phone's gallery. Unhide it anytime from the Hidden months screen."),
         Feature(R.drawable.ic_home_duplicate, "Find duplicates",
             "Finds exact duplicate photos and videos so you can delete the copies and reclaim space. The best copy in each group is pre-selected to keep."),
         Feature(R.drawable.ic_home_search, "Search",
@@ -44,6 +44,11 @@ class HelpActivity : AppCompatActivity() {
         supportActionBar?.title = "How it works"
 
         binding.tvVersion.text = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+
+        binding.btnWatchTour.setOnClickListener {
+            startActivity(android.content.Intent(this, OnboardingActivity::class.java)
+                .putExtra(OnboardingActivity.EXTRA_REPLAY, true))
+        }
 
         features.forEach { f ->
             val card = ItemHelpCardBinding.inflate(layoutInflater, binding.helpContainer, false)

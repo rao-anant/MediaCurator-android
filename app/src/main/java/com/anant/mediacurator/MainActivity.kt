@@ -24,6 +24,7 @@ import android.content.res.ColorStateList
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
+import androidx.core.view.doOnPreDraw
 import com.google.android.material.color.MaterialColors
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
@@ -56,6 +57,25 @@ class MainActivity : AppCompatActivity() {
     private var launchedForSearch = false          // opened from Home's Search card → back exits to Home
     private var pendingOpenSearch = false          // Home "Search" card: expand search once the menu exists
     private var pendingShowStats = false           // Home "Hidden & stats" card: show stats once loaded
+    private var pendingScrollToTopMonth: String? = null  // month just opened → scroll its header to top
+
+    // Released once the durable "demo already shown" marker has been consulted — blocks the
+    // first-run demo from flashing on a reinstall before that read completes.
+    private var onboardingGateReady = false
+
+    // The walk-through latch for the open month: it counts as "reached end" once BOTH its header and
+    // footer have been on screen (a long month thus needs a real top-to-bottom pass; a month that
+    // fits qualifies immediately). Resets only when the open month changes OR its rendered length
+    // changes (a sub-group expand/collapse) — NOT on every rebuild, so background refreshes don't
+    // wipe progress. Pure decision logic lives in [WalkLatch] (unit-tested, shared spec with iOS).
+    private val walk = WalkLatch()
+
+    // Runs the chevron "wave" on the teaser hint; null when not animating.
+    private var chevronAnimator: android.animation.ValueAnimator? = null
+    private var hintPointsUp = false   // current chevron direction (▲ when the target is above)
+
+    // RecyclerView's resting bottom padding (from XML); the bar's height is added on top when shown.
+    private var baseRvBottomPad = -1
 
     // Jump toggle: remembers the two positions so the swap FAB can bounce back and forth
     private var jumpAMonthKey: String? = null  // where we came FROM
@@ -130,6 +150,17 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+
+        // Edge-to-edge: lift the pinned Hide bar above the system navigation bar so it doesn't
+        // overlap the nav buttons/gesture pill. (fitsSystemWindows lets CoordinatorLayout dispatch
+        // insets to this child; the listener then applies only the bottom inset.)
+        binding.hideMonthBarContainer.fitsSystemWindows = true
+        val hideBarBasePadBottom = binding.hideMonthBarContainer.paddingBottom
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(binding.hideMonthBarContainer) { v, insets ->
+            val navBottom = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars()).bottom
+            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, hideBarBasePadBottom + navBottom)
+            insets
+        }
         binding.btnSort.setOnClickListener { showSortPopup() }
         // When opened from the Home hub, show an Up arrow back to it (consistent with the
         // other spokes like Duplicates). Once Home becomes the launcher this is always true.
@@ -196,6 +227,7 @@ class MainActivity : AppCompatActivity() {
                 val firstVisible = layoutManager?.findFirstVisibleItemPosition() ?: 0
                 binding.fabScrollToTop.isVisible = firstVisible > 15
                 updateStickyHeader(firstVisible)
+                updateHideBar()
             }
         })
     }
@@ -269,6 +301,12 @@ class MainActivity : AppCompatActivity() {
         if (viewModel.searchResults.value == null) {
             invalidateOptionsMenu()
         }
+        // If progress was reset from Settings (reachable straight from this screen's menu), the
+        // ViewModel re-seeds its in-memory review/expansion state from the cleared prefs; clear our
+        // own transient walk state to match, so a reviewed/walked month no longer shows the Hide bar.
+        if (viewModel.consumeResetIfPending()) {
+            walk.reset()
+        }
         // We ALWAYS trigger a refresh on resume. The ViewModel handles caching and
         // immediate filtering of deleted items using the static flight set.
         // This is necessary because the MediaViewerActivity may have deleted files.
@@ -282,6 +320,7 @@ class MainActivity : AppCompatActivity() {
         // load() reads it — otherwise Home would compute the resume target from a stale value.
         // Null in flat (size) mode or before the tree exists — skip then.
         currentVisibleMonthKey()?.let { viewModel.prefs.setLastViewedMonth(it) }
+        stopChevronWave()
     }
 
     @Suppress("OVERRIDE_DEPRECATION")
@@ -302,7 +341,16 @@ class MainActivity : AppCompatActivity() {
         val spanCount = 4
         adapter = GalleryAdapter(
             onYearToggle     = { year     -> viewModel.toggleYearExpansion(year) },
-            onMonthToggle    = { monthKey -> viewModel.toggleMonthExpansion(monthKey) },
+            onMonthToggle    = { monthKey ->
+                // Opening a month (not collapsing) → land at its TOP once the list rebuilds, so the
+                // user sees it from the first photo (the accordion/relayout would otherwise leave
+                // the viewport deep in the month).
+                val willExpand = adapter.currentList.none {
+                    it is GalleryItem.Header && it.monthKey == monthKey && it.isExpanded
+                }
+                if (willExpand) pendingScrollToTopMonth = monthKey
+                viewModel.toggleMonthExpansion(monthKey)
+            },
             onSubGroupToggle = { subKey   -> viewModel.toggleSubGroupExpansion(subKey) },
             onMediaClick  = { item ->
                 if (item.type == MediaType.PDF) {
@@ -354,8 +402,9 @@ class MainActivity : AppCompatActivity() {
             this.layoutManager = layoutManager
             this.adapter = this@MainActivity.adapter
             setHasFixedSize(false)
-            setItemViewCacheSize(30) 
+            setItemViewCacheSize(30)
         }
+        baseRvBottomPad = binding.recyclerView.paddingBottom
     }
 
     private fun setupSelectionBar() {
@@ -383,42 +432,16 @@ class MainActivity : AppCompatActivity() {
     private fun exitSelectionMode() {
         adapter.exitSelectionMode()
         binding.selectionBar.isVisible = false
+        updateHideBar()
         invalidateOptionsMenu()
     }
 
     /**
-     * First-run intro to the core curation concept. Shown once, only after the app is
-     * fully ready — media loaded AND the "All files access" decision resolved — so it never
-     * stacks on the permission prompts during install.  Idempotent: safe to call from any
-     * settle point (load finished, prompt dismissed, returned from Settings).
+     * The first-run demo is now launched by HomeActivity on app launch (mandatory until the user
+     * opts out) — not from the gallery. Kept as a harmless no-op so the old call sites don't need
+     * touching; remove in a later cleanup.
      */
-    private fun tryShowOnboarding() {
-        // The Home hub's hero ("Start curating" / "Continue curating") now teaches the concept,
-        // so the in-gallery onboarding dialog is retired. Kept as a no-op (call sites are
-        // harmless) to avoid churn; remove fully in a later cleanup.
-        if (true) return
-
-        @Suppress("UNREACHABLE_CODE")
-        if (viewModel.prefs.hasSeenOnboarding()) return
-        if (allFilesPromptActive) return                          // PDF-access decision still pending
-        if (awaitingAutoRestore) return                           // auto-restore check / prompt pending
-        if (!hasBasicPermissions()) return                        // media permission not granted yet
-        if (viewModel.isLoading.value != false) return            // still loading
-        if (viewModel.galleryItems.value.isNullOrEmpty()) return  // nothing on screen yet
-        viewModel.prefs.setSeenOnboarding()
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Curate, don't just scroll")
-            .setMessage(
-                "Media Curator remembers your progress so you never review the same photos twice.\n\n" +
-                "1.  Work through a month's photos, videos and PDFs.\n\n" +
-                "2.  Tap \"Hide this month\" when you're done — it steps out of your way " +
-                "(your files are never deleted, and stay in your normal gallery).\n\n" +
-                "3.  Next time, hidden months stay hidden — so you simply continue " +
-                "with what's left."
-            )
-            .setPositiveButton("Got it", null)
-            .show()
-    }
+    private fun tryShowOnboarding() { /* no-op — see HomeActivity */ }
 
     /**
      * Share the selected media via the system share sheet.  MediaStore content:// URIs
@@ -468,7 +491,208 @@ class MainActivity : AppCompatActivity() {
         } else {
             binding.selectionBar.isVisible = false
         }
+        updateHideBar()
         invalidateOptionsMenu()
+    }
+
+    /**
+     * Drive the bottom bar for the **currently open month** (bound to the open month, not scroll
+     * position — see the accordion). It guides the user through the whole curation flow:
+     *   • not fully reviewed yet (a section still unseen) + hint not retired → **review hint**
+     *     ("Also open WhatsApp to review {Month}") so the user knows there's more to look at.
+     *   • reviewed + NOT yet at the end + hint not retired → **scroll hint** ("Delete what you don't
+     *     want — hide {Month} at the end").
+     *   • reviewed + reached the end → live green **"Hide {Month}"** (tappable) + first-run coach-mark.
+     *   • otherwise (e.g. hint retired, or nothing reviewable) → bar hidden.
+     * All hints share the amber down-chevron wave and are retired together (first hide / dismiss).
+     */
+    private fun updateHideBar() {
+        updateEndReached()
+        val suppressed = binding.selectionBar.isVisible ||
+            inSearchMode || viewModel.searchResults.value != null
+        val k = if (suppressed) null else openMonthKey()
+        if (k == null) { hideHideBar(); return }
+        val footer = adapter.currentList.filterIsInstance<GalleryItem.Footer>().find { it.monthKey == k }
+        if (footer == null) { hideHideBar(); return }
+        val label = adapter.currentList.filterIsInstance<GalleryItem.Header>()
+            .find { it.monthKey == k }?.label ?: ""
+        val retired = viewModel.prefs.isScrollHintRetired()
+        // "Reached the end" this session OR already walked through on a prior visit at the same item
+        // count (no new photos) — so a fully-reviewed month doesn't demand re-scrolling on revisit.
+        val reached = walk.isReached(k) || viewModel.prefs.isMonthWalked(k, footer.fullCount)
+        val reviewMsg = reviewHintMessage(footer, label)
+        when (HideBarDecision.decide(footer.showHideButton, reached, retired, reviewMsg != null)) {
+            HideBarKind.HIDE          -> showLiveHideBar(k, label, footer.fullCount)
+            HideBarKind.SCROLL_TEASER -> showHintBar("Delete junk as you scroll back and forth — hide $label at the end", false)
+            HideBarKind.REVIEW_HINT   -> showHintBar(reviewMsg!!, reviewHintPointsUp(k, footer))
+            HideBarKind.NONE          -> hideHideBar()
+        }
+    }
+
+    /**
+     * Which way the hint chevrons should point to reach the still-to-review section. Up when that
+     * section sits in the upper half of (or above) the viewport — i.e. the user has to look up to it
+     * (e.g. opening WhatsApp first leaves Camera above; or a WhatsApp-only month scrolled past). Down
+     * otherwise (the section is below the middle / off the bottom).
+     */
+    private fun reviewHintPointsUp(monthKey: String, footer: GalleryItem.Footer): Boolean {
+        val targetSub = when {
+            footer.camPresent && !footer.camReviewed -> "$monthKey:cam"
+            !footer.waReviewed                       -> "$monthKey:wa"
+            else                                     -> return false
+        }
+        val pos = adapter.currentList.indexOfFirst {
+            it is GalleryItem.SubHeader && it.subKey == targetSub
+        }
+        if (pos < 0) return false
+        val lm = binding.recyclerView.layoutManager as? LinearLayoutManager ?: return false
+        val first = lm.findFirstVisibleItemPosition()
+        val last = lm.findLastVisibleItemPosition()
+        if (first < 0 || last < 0) return false
+        return pos <= (first + last) / 2   // target in the upper half / above → point up
+    }
+
+    /** The single open (expanded) month, or null. With the accordion there is at most one. */
+    private fun openMonthKey(): String? =
+        adapter.currentList.filterIsInstance<GalleryItem.Header>()
+            .firstOrNull { it.isExpanded }?.monthKey
+
+    /** Message nudging the user to review the still-unseen section(s), or null if none apply. */
+    private fun reviewHintMessage(footer: GalleryItem.Footer, label: String): String? {
+        // WhatsApp present ⇒ the two-section (Camera & Others / WhatsApp) layout.
+        if (footer.waPresent) {
+            val remaining = buildList {
+                if (footer.camPresent && !footer.camReviewed) add("Camera & Others")
+                if (!footer.waReviewed) add("WhatsApp")
+            }
+            return when (remaining.size) {
+                1 -> "Also open ${remaining[0]} to review $label"
+                2 -> "Open both sections to review $label"
+                else -> null
+            }
+        }
+        // Flat month not fully reviewed ⇒ a type filter is off, hiding items the gate needs.
+        return if (footer.camPresent && !footer.camReviewed)
+            "Turn on all type filters to review $label" else null
+    }
+
+    private fun hideHideBar() {
+        binding.hideMonthBarContainer.isVisible = false
+        binding.coachHideTip.isVisible = false
+        binding.teaserHideHint.isVisible = false
+        stopChevronWave()
+        applyBarInsets()
+    }
+
+    /**
+     * Keep the list and the floating bottom bar separate: pad the RecyclerView's bottom by the bar's
+     * height so the last months/year can scroll clear of the bar/coach-mark instead of hiding behind
+     * it. (clipToPadding=false in the layout lets items scroll into the padding region.)
+     */
+    private fun applyBarInsets() {
+        val rv = binding.recyclerView
+        rv.post {
+            val pad = if (binding.hideMonthBarContainer.isVisible)
+                binding.hideMonthBarContainer.height else baseRvBottomPad
+            if (rv.paddingBottom != pad) {
+                rv.setPadding(rv.paddingLeft, rv.paddingTop, rv.paddingRight, pad)
+            }
+        }
+    }
+
+    private fun showLiveHideBar(key: String, label: String, fullCount: Int) {
+        // Remember this month was fully reviewed + walked through (at this item count), so a later
+        // visit can offer Hide immediately without forcing another scroll.
+        viewModel.prefs.setMonthWalked(key, fullCount)
+        stopChevronWave()
+        binding.teaserHideHint.isVisible = false
+        binding.btnHideMonthBar.isVisible = true
+        binding.btnHideMonthBar.text = "Hide $label"
+        binding.hideMonthBarContainer.isVisible = true
+        binding.coachHideTip.isVisible = !viewModel.prefs.hasSeenHideCoach()
+        if (binding.coachHideTip.isVisible) {
+            binding.coachHideTip.setOnClickListener { dismissHideCoach() }
+        }
+        binding.btnHideMonthBar.setOnClickListener {
+            dismissHideCoach()
+            val parts = key.split("-")
+            hideMonthWithUndo(parts.getOrNull(0)?.toIntOrNull() ?: 0,
+                parts.getOrNull(1)?.toIntOrNull() ?: 0, label)
+        }
+        applyBarInsets()
+    }
+
+    private fun showHintBar(message: String, pointUp: Boolean) {
+        binding.btnHideMonthBar.isVisible = false
+        binding.coachHideTip.isVisible = false
+        binding.tvTeaserText.text = message
+        val glyph = if (pointUp) "▲" else "▼"
+        if (binding.chev1.text != glyph) {
+            binding.chev1.text = glyph; binding.chev2.text = glyph; binding.chev3.text = glyph
+        }
+        if (pointUp != hintPointsUp) { hintPointsUp = pointUp; stopChevronWave() }  // direction flip → restart wave
+        binding.teaserHideHint.isVisible = true
+        binding.hideMonthBarContainer.isVisible = true
+        binding.btnTeaserDismiss.setOnClickListener {
+            viewModel.prefs.setScrollHintRetired()
+            updateHideBar()
+        }
+        startChevronWave()
+        applyBarInsets()
+    }
+
+    /** Down-chevron "wave" (Vegas-marquee feel, tastefully): brightness sweeps top→bottom. */
+    private fun startChevronWave() {
+        if (chevronAnimator != null) return
+        val chevs = listOf(binding.chev1, binding.chev2, binding.chev3)
+        if (animationsDisabled()) { chevs.forEach { it.alpha = 1f }; return }
+        val bobPx = 3f * resources.displayMetrics.density   // small downward bob amplitude
+        chevronAnimator = android.animation.ValueAnimator.ofFloat(0f, 3f).apply {
+            duration = 1200
+            repeatCount = android.animation.ValueAnimator.INFINITE
+            interpolator = android.view.animation.LinearInterpolator()
+            addUpdateListener { a ->
+                val phase = a.animatedValue as Float
+                chevs.forEachIndexed { i, v ->
+                    // Sweep top→bottom normally, bottom→top when pointing up.
+                    val idx = if (hintPointsUp) (chevs.size - 1 - i) else i
+                    val d = ((phase - idx) % 3f + 3f) % 3f        // 0 when the wave is on this chevron
+                    v.alpha = (0.45f + 0.55f * (1f - d.coerceAtMost(1f))).coerceIn(0.45f, 1f)
+                }
+                // Gentle vertical bob synced with the wave — a physical "pull" toward the target.
+                val dir = if (hintPointsUp) -1f else 1f
+                binding.teaserChevrons.translationY =
+                    dir * bobPx * kotlin.math.sin(phase / 3f * 2f * Math.PI).toFloat()
+            }
+            start()
+        }
+    }
+
+    private fun stopChevronWave() {
+        chevronAnimator?.cancel()
+        chevronAnimator = null
+        binding.teaserChevrons.translationY = 0f
+    }
+
+    private fun animationsDisabled(): Boolean = try {
+        android.provider.Settings.Global.getFloat(
+            contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f
+        ) == 0f
+    } catch (e: Exception) { false }
+
+    private fun dismissHideCoach() {
+        if (binding.coachHideTip.isVisible) binding.coachHideTip.isVisible = false
+        viewModel.prefs.setSeenHideCoach()
+        applyBarInsets()   // coach gone → bar shorter → reclaim the list padding
+    }
+
+    private fun hideMonthWithUndo(year: Int, month: Int, label: String) {
+        viewModel.prefs.setScrollHintRetired()   // first successful hide → user understands; retire teaser
+        viewModel.markMonthDone(year, month)
+        com.google.android.material.snackbar.Snackbar
+            .make(binding.root, "$label hidden from this app", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
+            .setAction("Undo") { viewModel.restoreMonth(year, month) }
+            .show()
     }
 
     private fun observeViewModel() {
@@ -476,10 +700,39 @@ class MainActivity : AppCompatActivity() {
             // Search takes over the list area — don't let a gallery refresh overwrite results/prompt
             if (inSearchMode || viewModel.searchResults.value != null) return@observe
             adapter.submitList(items)
+            // A month the user just opened → land on its header (top of the month), not mid/end.
+            // Structural changes apply synchronously in the adapter, but the RecyclerView still needs
+            // a layout pass before positions are valid — so expand the app bar, then run the scroll
+            // in doOnPreDraw (fires after the next layout, not on a guessed delay) so it lands
+            // correctly even on a slow frame.
+            pendingScrollToTopMonth?.let { key ->
+                if (items.any { it is GalleryItem.Header && it.monthKey == key }) {
+                    binding.appBarLayout.setExpanded(true, false)
+                    binding.recyclerView.doOnPreDraw {
+                        val curr = adapter.currentList
+                        val hp = curr.indexOfFirst { it is GalleryItem.Header && it.monthKey == key }
+                        val fp = curr.indexOfFirst { it is GalleryItem.Footer && it.monthKey == key }
+                        if (hp >= 0) {
+                            (binding.recyclerView.layoutManager as? GridLayoutManager)
+                                ?.scrollToPositionWithOffset(hp, 0)
+                        }
+                        // Start the walk fresh FROM THE TOP: header just scrolled into view (seen),
+                        // footer not yet — so a long month must still be scrolled to the end. This
+                        // discards any latch from the transient pre-scroll viewport.
+                        if (hp >= 0 && fp >= 0) walk.onOpenedAtTop(key, fp - hp)
+                        pendingScrollToTopMonth = null
+                        updateHideBarWhenSettled()
+                    }
+                }
+            }
             val isLoading = viewModel.isLoading.value ?: false
             binding.tvEmpty.isVisible = items.isEmpty() && !isLoading
             if (items.isEmpty() && !isLoading) binding.tvEmpty.text = resolveEmptyMessage()
+            // Note: the "walked through" latch is NOT cleared here — updateEndReached() re-earns it
+            // only when the open month or its rendered length actually changes, so frequent
+            // background refreshes (indexing/hashing) don't wipe the user's scroll progress.
             binding.recyclerView.post { updateStickyHeader() }
+            updateHideBarWhenSettled()
             tryShowOnboarding()
 
             // Home "Resume" deep-link: land on the target month once the tree is built. Resolution:
@@ -522,6 +775,7 @@ class MainActivity : AppCompatActivity() {
                     binding.tvEmpty.text = "No results — try different keywords\nor check for typos"
                 }
             }
+            updateHideBar()
         }
         
         viewModel.isLoading.observe(this) { loading ->
@@ -1123,6 +1377,57 @@ class MainActivity : AppCompatActivity() {
             if (item is GalleryItem.Header) return item.monthKey
         }
         return null
+    }
+
+    /**
+     * Latch "the open month has actually been walked through" once BOTH its Header and its Footer
+     * have been on screen since the last list rebuild. A short month shows both at once (no scroll
+     * needed); a long one requires scrolling from top to bottom. This deliberately ignores a footer
+     * that is only *incidentally* visible after expanding a section above (the header won't have been
+     * seen yet) — so the user can't be handed Hide without passing the newly-opened content. The
+     * seen-flags reset on each rebuild (see the galleryItems observer).
+     */
+    /**
+     * Refresh the Hide bar once any in-flight item animations (accordion expand/collapse, inserts)
+     * have finished, so [updateEndReached] evaluates against the settled list — not a transient
+     * where a long month's footer is momentarily near its header. Fires immediately if nothing is
+     * animating (e.g. a month that genuinely fits still gets Hide right away).
+     */
+    private fun updateHideBarWhenSettled() {
+        val rv = binding.recyclerView
+        val animator = rv.itemAnimator
+        if (animator != null) {
+            animator.isRunning { rv.post { updateHideBar() } }
+        } else {
+            rv.post { updateHideBar() }
+        }
+    }
+
+    private fun updateEndReached() {
+        // A month was just opened and we're about to scroll its header to the top — don't evaluate
+        // "reached end" against the transient pre-scroll viewport (its footer may be momentarily
+        // visible). The scroll-to-top callback re-establishes a fresh walk once it lands.
+        if (pendingScrollToTopMonth != null) return
+        // Don't evaluate "reached end" against a list that's mid-rebuild or animating. During the
+        // accordion expand the newly-opened month's items insert/animate in, and for a moment its
+        // footer sits just below the header (only a few rows laid out) — evaluating then would latch
+        // the footer as "seen" and wrongly offer Hide without any scroll. Re-evaluated once the
+        // animations settle (see [updateHideBarWhenSettled], called after each rebuild).
+        val rv = binding.recyclerView
+        if (rv.isAnimating || rv.isComputingLayout) return
+        val lm = rv.layoutManager as? LinearLayoutManager ?: return
+        val list = adapter.currentList
+        val openMonth = list.filterIsInstance<GalleryItem.Header>()
+            .firstOrNull { it.isExpanded }?.monthKey ?: return
+        val headerPos = list.indexOfFirst { it is GalleryItem.Header && it.monthKey == openMonth }
+        val footerPos = list.indexOfFirst { it is GalleryItem.Footer && it.monthKey == openMonth }
+        if (headerPos < 0 || footerPos < 0) return
+        val first = lm.findFirstVisibleItemPosition()
+        val last = lm.findLastVisibleItemPosition()
+        if (first < 0 || last < 0) return
+        // Latch/reset logic (fresh walk on month or span change, header/footer edge detection) lives
+        // in the pure [WalkLatch] — see its docs and CurationLogicTest.
+        walk.onViewport(openMonth, headerPos, footerPos, first, last)
     }
 
     private fun showToast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()

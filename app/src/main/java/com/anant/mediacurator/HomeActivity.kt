@@ -45,14 +45,20 @@ class HomeActivity : AppCompatActivity() {
     // the gallery is opened, so Home's stats are correct immediately after a reinstall.
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { viewModel.load(); bootstrapStorage() }
+    ) { viewModel.load(); afterMediaAccessSought() }
 
     private val allFilesLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
         launchedAllFilesSettings = false
-        runRestores()   // permission decided — restore stats + hidden months with file access
+        maybeShowDemoThenRestore()   // All-files decided — now the demo, then the restores
     }
+
+    // The mandatory first-run demo plays AFTER every access request has been sought (media
+    // permission + All-files access); when it closes we run the restores.
+    private val demoLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { runRestores() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,30 +93,53 @@ class HomeActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // Media-access request comes FIRST. If it's already granted (returning launch), we skip
+        // straight to afterMediaAccessSought(); otherwise the system dialog is shown and its
+        // callback lands us there. Either way the demo plays only once access has been sought.
         if (hasMediaPermissions()) {
             viewModel.load()   // refresh on return (e.g. after hiding months / deleting)
-            bootstrapStorage()
+            afterMediaAccessSought()
         } else {
             permissionLauncher.launch(requiredPermissions())
         }
     }
 
     /**
-     * Up-front storage bootstrap (runs once media permission is granted):
-     *  1. On Android 11+ without All-files access, show the rationale ONCE and send the user
-     *     to Settings. PDFs and cross-reinstall restore both need this permission.
-     *  2. Either way, restore the lifetime Cleaned-up counter and the hidden-months list from
-     *     their Downloads backups, so Home's stats are correct before the gallery is opened.
+     * Called once the media-permission request has been sought (granted or denied). The SECOND
+     * access request — All-files access — comes next; only after BOTH have been sought does the
+     * mandatory demo play (see [maybeShowDemoThenRestore]).
      */
-    private fun bootstrapStorage() {
+    private fun afterMediaAccessSought() {
+        requestAllFilesAccess()
+    }
+
+    /**
+     * The All-files access request (the second access prompt). On Android 11+ without the
+     * permission, show the rationale ONCE and send the user to Settings. Once it's decided —
+     * or if it isn't needed — we fall through to the demo, then the restores.
+     */
+    private fun requestAllFilesAccess() {
         val needsAllFiles = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
                 !Environment.isExternalStorageManager()
         if (needsAllFiles && !prefs.wasAllFilesPromptShown()) {
             prefs.setAllFilesPromptShown()
             showAllFilesRationale()
         } else {
-            runRestores()
+            maybeShowDemoThenRestore()
         }
+    }
+
+    /**
+     * With every access request sought, play the mandatory demo (once per launch, unless the user
+     * opted out) and defer the restores until it closes. Otherwise restore straight away.
+     */
+    private fun maybeShowDemoThenRestore() {
+        if (!demoShownThisLaunch && !prefs.isDemoDisabled()) {
+            demoShownThisLaunch = true
+            demoLauncher.launch(Intent(this, OnboardingActivity::class.java))
+            return
+        }
+        runRestores()
     }
 
     private fun showAllFilesRationale() {
@@ -132,9 +161,9 @@ class HomeActivity : AppCompatActivity() {
             }
             .setNegativeButton("Not now", null)
             // Fires for Not-now / back / outside-tap. Allow also dismisses, but then the
-            // Settings screen is handling it — allFilesLauncher runs the restore on return.
+            // Settings screen is handling it — allFilesLauncher continues on return.
             .setOnDismissListener {
-                if (!launchedAllFilesSettings) runRestores()
+                if (!launchedAllFilesSettings) maybeShowDemoThenRestore()
             }
             .show()
     }
@@ -246,6 +275,10 @@ class HomeActivity : AppCompatActivity() {
     }
 
     companion object {
+        // Once per process: the mandatory demo auto-shows only on a genuine app launch, not every
+        // time Home returns to the foreground.
+        private var demoShownThisLaunch = false
+
         /** Set when the gallery is opened from the hub so it shows an Up arrow back to Home. */
         const val EXTRA_FROM_HOME = "extra_from_home"
         /** Month key ("YYYY-MM") to scroll to on open (hero "Resume"). */

@@ -121,6 +121,14 @@ sealed class GalleryItem {
     data class Footer(
         val monthKey: String,
         override val structuralVersion: Int = 0,
-        val showHideButton: Boolean = false
+        val showHideButton: Boolean = false,
+        // Per-sub-group review state, so the bottom hint can name what's left to review.
+        val camPresent: Boolean = false,
+        val camReviewed: Boolean = false,
+        val waPresent: Boolean = false,
+        val waReviewed: Boolean = false,
+        // Full (unfiltered) item count — stable across chip toggles; used to detect whether new
+        // photos were added since the month was last "walked through" (revisit-skips-scroll guard).
+        val fullCount: Int = 0
     ) : GalleryItem()
 }

@@ -55,7 +55,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="6dp"
                         android:lineSpacingExtra="3dp"
-                        android:text="Most gallery apps forget what you've already seen. Media Curator remembers — so you never review the same item again."
+                        android:text="Most gallery and photos apps forget what you've already seen. Media Curator remembers — so you never review the same item again."
                         android:textColor="@color/on_surface_variant"
                         android:textSize="14sp" />
 
@@ -146,6 +146,16 @@
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnWatchTour"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:text="Watch how curating works"
+                app:icon="@drawable/ic_home_hidden"
+                app:cornerRadius="24dp" />
 
             <!-- Feature cards added in code -->
             <LinearLayout

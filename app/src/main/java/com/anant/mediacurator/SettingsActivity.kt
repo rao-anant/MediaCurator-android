@@ -77,7 +77,7 @@ class SettingsActivity : AppCompatActivity() {
                 .show()
         } else {
             prefs.setPdfContentSearchEnabled(true)
-            toast("PDF content search enabled — indexing resumes in the gallery")
+            toast("PDF content search enabled — indexing resumes in the app")
         }
     }
 

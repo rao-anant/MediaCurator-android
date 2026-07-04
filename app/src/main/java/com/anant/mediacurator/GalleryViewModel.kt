@@ -229,6 +229,26 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     // past the gate. Never cleared on collapse; persisted across sessions.
     private val seenReviewKeys    = Collections.synchronizedSet(mutableSetOf<String>())
 
+    // Last curation-reset epoch we've synced to. If Settings resets progress while this ViewModel is
+    // still alive (Settings is reachable from the gallery menu), our in-memory sets are stale; we
+    // re-seed them from the cleared prefs on the next resume via [consumeResetIfPending].
+    private var syncedResetEpoch = CurationResetSignal.epoch
+
+    /**
+     * If a curation reset happened since we last checked, drop all in-memory review/expansion state
+     * and re-seed from the (now-cleared) prefs. Returns true if a reset was consumed, so the caller
+     * (MainActivity) can also clear its own transient walk state. Call before a reload on resume.
+     */
+    fun consumeResetIfPending(): Boolean {
+        if (syncedResetEpoch == CurationResetSignal.epoch) return false
+        syncedResetEpoch = CurationResetSignal.epoch
+        expandedYears.clear();     expandedYears.addAll(prefs.getExpandedYears())
+        expandedMonths.clear();    expandedMonths.addAll(prefs.getExpandedMonths())
+        expandedSubGroups.clear(); expandedSubGroups.addAll(prefs.getExpandedSubGroups())
+        seenReviewKeys.clear();    seenReviewKeys.addAll(prefs.getSeenReviewKeys())
+        return true
+    }
+
     init {
         _sortMode.value = prefs.getSortMode()
         _includePhoto.value = prefs.isIncludePhoto()
@@ -294,7 +314,16 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleMonthExpansion(monthKey: String) {
-        if (expandedMonths.contains(monthKey)) expandedMonths.remove(monthKey) else expandedMonths.add(monthKey)
+        if (expandedMonths.contains(monthKey)) {
+            expandedMonths.remove(monthKey)
+        } else {
+            // Accordion: only one month open at a time. Collapse any other open month (and all
+            // sub-group expansions) so there's always a single focus and a single, stable Hide bar.
+            expandedMonths.clear()
+            expandedSubGroups.clear()
+            expandedMonths.add(monthKey)
+            prefs.saveExpandedSubGroups(expandedSubGroups.toSet())
+        }
         prefs.saveExpandedMonths(expandedMonths.toSet())
         structuralVersion++
         loadMedia(forceRefresh = false)
@@ -365,8 +394,13 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
         // A forced refresh re-syncs with MediaStore truth: drop the never-cleared session-delete
         // guard so items un-trashed from the system gallery reappear. (Items still in trash stay
-        // hidden because the MediaStore query already excludes IS_TRASHED rows.)
-        if (forceRefresh) sessionDeletedFingerprints.clear()
+        // hidden because the MediaStore query already excludes IS_TRASHED rows.) A full reload also
+        // pulls the renamed row, so the rename guard is no longer needed — clear it here so it can
+        // never get stuck (belt-and-suspenders with the content-observer clearing it on change).
+        if (forceRefresh) {
+            sessionDeletedFingerprints.clear()
+            renameInFlight = false
+        }
 
         val sortMode = _sortMode.value ?: SortMode.DATE_OLDEST
         val photoOn = _includePhoto.value ?: true
@@ -609,9 +643,17 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                                 // (ignoring the current chip filter) must have been seen. Hidden
                                 // types / chips therefore block the button until viewed with the
                                 // chip on. Sub-groups/types not present in the month aren't required.
-                                val required = requiredKeys("cam", fullCam) + requiredKeys("wa", fullWa)
-                                val showHideButton = required.all { seenReviewKeys.contains(it) }
-                                treeItems.add(GalleryItem.Footer(group.key, currentVersion, showHideButton))
+                                val camReq = requiredKeys("cam", fullCam).toList()
+                                val waReq  = requiredKeys("wa", fullWa).toList()
+                                val showHideButton = (camReq + waReq).all { seenReviewKeys.contains(it) }
+                                treeItems.add(GalleryItem.Footer(
+                                    group.key, currentVersion, showHideButton,
+                                    camPresent  = fullCam.isNotEmpty(),
+                                    camReviewed = camReq.all { seenReviewKeys.contains(it) },
+                                    waPresent   = fullWa.isNotEmpty(),
+                                    waReviewed  = waReq.all { seenReviewKeys.contains(it) },
+                                    fullCount   = fullItems.size
+                                ))
                             }
                         }
                     }
@@ -798,7 +840,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             // Attempt direct rename first
             if (repo.renameMedia(item, newDisplayName)) {
-                applyCachedRename(item, newDisplayName)   // schedules renameInFlight = false after 5 s
+                applyCachedRename(item, newDisplayName)   // guard cleared by the observer's change
                 _renameResult.postValue(newDisplayName)
                 return@launch
             }
@@ -831,34 +873,24 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch(Dispatchers.IO) {
             val success = repo.renameMedia(item, name)
-            if (success) applyCachedRename(item, name)   // schedules renameInFlight = false after 5 s
+            if (success) applyCachedRename(item, name)   // guard cleared by the observer's change
             else renameInFlight = false
             _renameResult.postValue(if (success) name else "")
         }
     }
 
     /**
-     * Patch the renamed item's displayName in the in-memory cache, then schedule
-     * a forced refresh after the rename guard expires.
+     * Patch the renamed item's displayName in the in-memory cache so it shows the new name
+     * immediately, without waiting for MediaStore to re-index.
      *
-     * Two-phase approach:
-     *   1. Immediately update cachedRawMedia so the item shows its new name without
-     *      waiting for MediaStore to finish re-indexing.
-     *   2. After 6 s (≥ observer's 3 s debounce + MediaScannerConnection latency),
-     *      drop the renameInFlight guard and do one forceRefresh — this replaces any
-     *      stale MediaStore ID (devices that delete+reinsert the row on rename) with
-     *      the fresh entry the scanner just created.
+     * No timer here: the rename triggers a MediaStore change notification, and the content observer
+     * (which sees the [renameInFlight] guard) drops the guard and does the debounced forceRefresh
+     * when that fires — event-driven, so any new-ID row from a delete+reinsert rename is replaced as
+     * soon as MediaStore actually settles rather than after a fixed guess.
      */
     private fun applyCachedRename(item: MediaItem, newDisplayName: String) {
         cachedRawMedia = cachedRawMedia?.map { m ->
             if (m.id == item.id && m.type == item.type) m.copy(displayName = newDisplayName) else m
-        }
-        viewModelScope.launch {
-            delay(6_000)
-            renameInFlight = false
-            // Now that the guard is down, pull fresh data from MediaStore so any new
-            // MediaStore entry (possibly with a new ID) replaces the cache-patched one.
-            loadMedia(forceRefresh = true)
         }
     }
 
@@ -952,9 +984,13 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
         mediaObserver = object : ContentObserver(handler) {
             override fun onChange(selfChange: Boolean) {
-                // Skip if we triggered this change via our own deletion or rename.
+                // Our own deletion has its own progressive refreshes — don't double up here.
                 if (deletedFingerprintsInFlight.isNotEmpty()) return
-                if (renameInFlight) return
+                // A rename we just performed settles in MediaStore as this change. Drop the guard and
+                // let the debounced reload below pull the fresh (possibly new-ID) row — event-driven,
+                // instead of a fixed post-rename delay. Bursty delete+reinsert renames coalesce via
+                // the 3s debounce.
+                renameInFlight = false
                 handler.removeCallbacks(refresh)
                 handler.postDelayed(refresh, 3_000L)
             }
@@ -1771,6 +1807,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
 
     // ── Auto-backup ───────────────────────────────────────────────────────────
 

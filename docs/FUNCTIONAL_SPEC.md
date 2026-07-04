@@ -19,6 +19,11 @@ to help the user work through their library *once* and never re-review the same 
   vs **WhatsApp** sub-groups).
 - When the user finishes reviewing a month, they **Hide** it. Hidden months leave the app's
   view but **stay in the phone's real gallery** (nothing is deleted). Hidden state persists.
+  This is the single most important concept users miss, so it is taught up front with a
+  first-run **animated explainer** (see §13) and reinforced with an in-context coach-mark.
+- **Wording note:** "gallery" in UI copy refers **only to the phone's own gallery** (where files
+  truly remain). When describing what happens *inside MediaCurator*, copy says **"this app"** —
+  never "gallery" — so users never think the app is touching/clearing their real gallery.
 - Deletions are **soft** — items go to a recoverable **Trash** with multiple undo paths.
 - Everything is **on-device**: no network, accounts, ads, or analytics. Search/PDF text/dup
   detection are all local.
@@ -45,6 +50,7 @@ HOME (hub, launcher)
  ├── Toolbar ⓘ Stats                      → STATS dialog
  └── Overflow: Help, Settings            → HELP / SETTINGS
 
+GALLERY (first entry ever) ──> FIRST-RUN ANIMATION (§13), once; also replayable from Help
 GALLERY ──tap item──> VIEWER (full-screen pager)
 SEARCH  ──tap item──> VIEWER
 HIDDEN  ──tap item──> VIEWER
@@ -116,17 +122,87 @@ tree, with a sticky header, filter chips, sort, search, and selection actions.
   "N% curated" (percent of that year's months hidden), and up to 2 preview thumbnails.
   Tap toggles year expand/collapse.
 - **Month header** row (only when year expanded): ▶/▼, month label, type breakdown. Tap toggles.
+  **Accordion: only one month is open at a time** — opening a month auto-collapses the previously
+  open month (and all sub-group expansions). This keeps a single focus and a single, stable Hide
+  bar. (It is *not* a forced decision: opening another month is allowed any time; it simply tidies
+  the previous one back to a header. There is deliberately **no "keep unhidden" action** — months
+  are visible by default and only leave via an explicit Hide.)
 - When a month is expanded, its items appear. **Two layouts:**
   - **Flat** (month has no WhatsApp items): items shown directly.
   - **Sub-grouped** (month has WhatsApp items): a **"Camera & Others"** sub-header and a
     **"WhatsApp"** sub-header, each ▶/▼ collapsible with its own type breakdown. Items appear
     under whichever sub-group is expanded.
-- **Footer** row at the end of each expanded month: the **"Hide Month from this app"** button
-  (see visibility rule below) + a thin divider.
+- **Footer** row at the end of each expanded month: a thin divider. (Historically this row held
+  the "Hide Month" button; that button is now retired in favour of the **pinned Hide-month bar**
+  below, which is reachable without scrolling to the month's end. The footer's eligibility flag
+  still drives the bar.)
 
-### "Hide Month" button visibility rule  ⚠ important
-The footer's Hide button only appears once the user has actually **reviewed everything in the
-month** — every media type, in every sub-group. The gate is **per (sub-group × type)**:
+### Pinned "Hide month" bar  ⚠ important
+Hiding a month is driven by a **bar pinned to the bottom of the gallery**, not an in-list button:
+
+- The bar is **bound to the single open month** (see accordion above), and appears once that month
+  is eligible. Eligibility requires **both**: (a) the per-(sub-group × type) review gate below is
+  satisfied, **and** (b) the month has been **walked through** — defined as *both* its header (top)
+  and its footer (bottom) having been on screen since the month was opened (or last changed length),
+  **with the footer only counting once the header has already been seen** (ordering rule). A month
+  that fully fits on screen satisfies this at once (no scroll demanded); a longer month requires an
+  actual top-to-bottom pass. The ordering rule matters because "header seen" is **never assumed on
+  open** — it is only credited from a real observation that the header is at the top. Otherwise a
+  freshly opened month that happens to land showing its *own footer* (scroll position carried over
+  from the previous month) would instantly satisfy the gate and jump straight to "Hide" without any
+  scroll; it also covers the sub-group case (expanding a section *above* makes the footer incidentally
+  visible without the user seeing the new content). (Rationale: the scroll-through is where users spot
+  junk worth deleting, so it's a gentle nudge toward real curation rather than blind hiding.) The walk
+  state is re-earned when the open month changes or its **rendered length** changes (a sub-group
+  expand/collapse) — but *not* on incidental background refreshes (indexing/hashing), so progress
+  isn't wiped mid-scroll. The pure rules live in `WalkLatch` (unit-tested; see
+  `docs/CURATION_REGRESSION_TESTS.md`). Label is **"Hide {Month}"** (e.g. "Hide March 2024") with a ✓
+  icon.
+- It is **bound to the open month, not the scroll position** — once shown it stays put as the user
+  scrolls anywhere in the list, and only changes/disappears when the user hides that month or opens
+  (or collapses) another. This avoids the bar flip-flopping between months while scrolling.
+- It is **hidden** during selection mode and on the search screen, and in flat size-sort mode
+  (which has no month headers).
+- **It never covers content:** while the bar (or its coach-mark/teaser) is shown, the gallery list
+  is given matching bottom padding so the last months/year scroll clear of the bar instead of
+  hiding behind it. The bar itself is also inset above the **system navigation bar** (edge-to-edge),
+  so it never overlaps the nav buttons / gesture pill.
+- **Guided hint states (for new users):** before the live button, the bar acts as a coach through
+  the whole flow, all sharing an animated **amber** down-chevron "wave" (▼▼▼ that brighten top→bottom
+  and gently bob — a tasteful marquee, honouring the system reduce-motion setting), **amber bold**
+  text, and a dismiss ✕:
+  - **Review-sections hint** — when the open month isn't fully reviewed yet because a section is
+    still unseen: *"Open both sections to review {Month}"* or, once one is done, *"Also open WhatsApp
+    to review {Month}"* / *"Also open Camera & Others to review {Month}"* (names whichever of Camera &
+    Others / WhatsApp remains). This closes the gap where opening only one sub-group gave no feedback
+    that more review was needed. The chevrons **point toward the section** — **up (▲)** when it sits
+    in the upper half of / above the viewport (e.g. opening WhatsApp first leaves Camera above, or a
+    WhatsApp-only month scrolled past), **down (▼)** when it's in the lower half / below.
+    (Flat month not reviewed because a type filter is off → *"Turn on all type filters to review
+    {Month}"*.)
+  - **Scroll hint** — once reviewed but the end isn't reached (a long month): *"Delete junk as you
+    scroll back and forth — hide {Month} at the end"*, nudging the user through every item (where the junk worth
+    deleting is) before hiding.
+  On reaching the end it becomes the live green **"Hide {Month}"** button. All these hints are
+  **retired together** (the bar then just appears at the end, no coaching) once the user hides their
+  first month *or* taps a hint's ✕ — tracked by a persisted flag.
+- **Revisit doesn't re-demand the scroll:** when a month has been fully reviewed *and* walked to its
+  end, that's remembered (persisted with the month's full item count). On a later visit the live
+  **"Hide {Month}"** button appears immediately — no need to scroll through again — as long as the
+  count hasn't **grown**. Deletions (count same or lower) still count as fully seen; only **new
+  photos** (a higher count) re-require the walk-through.
+- Because it's pinned, the action is always reachable — the user never has to scroll to the
+  bottom of a long month to find it. (This solves the discoverability problem where, with both
+  Camera and WhatsApp expanded, the old footer button sat far below the fold.)
+- **First-appearance coach-mark:** the very first time the bar is ever shown, a one-shot tooltip
+  bubble appears above it: *"You've reviewed this month — tap to hide it and remove it from this
+  app. Your files are never deleted; they stay in your phone's gallery. Find it again under Hidden
+  months."* It is dismissed on tap (its own or the bar's) and never shown again (a persisted flag).
+
+### "Hide month" eligibility rule (gate)  ⚠ important
+The bar (and the gate flag on the footer) only becomes available once the user has actually
+**reviewed everything in the month** — every media type, in every sub-group. The gate is
+**per (sub-group × type)**:
 
 - A type counts as **"seen"** for a sub-group only when that sub-group is **expanded while that
   type's chip is on** (so the items are actually on screen). Expanding Camera with the Videos
@@ -147,9 +223,10 @@ Camera photos + Camera videos + WhatsApp photos → you must view Camera with bo
 video chips on **and** open WhatsApp with the photo chip on before Hide appears.
 
 ### Hiding a month
-Tapping "Hide Month" immediately hides it and shows a **Snackbar**: *"{Month} hidden from this
-app"* with an **Undo** action (LENGTH_LONG). Undo un-hides it. Hiding writes to the persistent
-hidden-months set and triggers a Downloads backup.
+Tapping the pinned **"Hide {Month}"** bar immediately hides it and shows a **Snackbar**:
+*"{Month} hidden from this app"* with an **Undo** action (LENGTH_LONG). Undo un-hides it. Hiding
+writes to the persistent hidden-months set and triggers a Downloads backup. (Tapping the bar also
+permanently dismisses the first-run coach-mark.)
 
 ### Filter chips (the "settings bar")
 Four cards: **📷 Photos, 🎬 Videos, 🎵 Audio, 📄 PDFs**. Each shows a count (total, and
@@ -177,6 +254,10 @@ When the gallery opens via Home's Resume/Start, it lands using these rules, in o
 "All caught up" is preserved (the hero still says so when every month is curated). The last-viewed
 month is saved as the top-of-viewport month on leave (skipped in flat Largest-overall mode). Net
 effect: leave mid-library, come back, and you're where you left off — even across Home round-trips.
+
+**Opening a month lands at its top.** Tapping a month header to expand it scrolls that month's
+header to the top so the user starts from its first photos — not left mid/end after the accordion
+collapse + relayout shift the viewport. (The scroll runs after the list is laid out.)
 
 ### Sticky header
 As the user scrolls, a sticky overlay shows the current Year (always), Month (when scrolled
@@ -432,7 +513,7 @@ Reachable from every screen's overflow.
 - **PDF content search** toggle. Turning **off** shows a confirm dialog **"Disable PDF content
   search?"** ("Background indexing will stop and PDF results will be matched by file name only…
   existing index files are kept…"). **Disable** / **Cancel** (Cancel reverts the switch). Toasts
-  on each outcome. Turning on toasts *"…indexing resumes in the gallery"*.
+  on each outcome. Turning on toasts *"…indexing resumes in the app"*.
 - **Export hidden months** — writes a timestamped JSON to Downloads
   (`mediacurator_hidden_<stamp>.json`); toast with the path. If none: *"No hidden months to
   export"*.
@@ -448,9 +529,12 @@ toggle is the same concept.
 
 ## 11. HELP
 
-Static "How it works" screen: a scrollable list of feature cards (icon + title + description)
-covering: Browse/filter/sort, Hide a month, Find duplicates, Search, Select & act, Stats
-anywhere, Private by design. Footer shows *"Version X (build)"*.
+Static "How it works" screen: a hero card ("Curate, don't just scroll" — three-step
+Review → Hide → Continue), a **"Watch how curating works"** button that replays the first-run
+animation (see §13, opened in replay mode → its primary button reads "Done"), then a scrollable
+list of feature cards (icon + title + description) covering: Browse/filter/sort, Hide a month,
+Find duplicates, Search, Select & act, Stats anywhere, Private by design. Footer shows
+*"Version X (build)"*.
 
 ---
 
@@ -473,6 +557,69 @@ anywhere, Private by design. Footer shows *"Version X (build)"*.
   Hidden-months + lifetime "cleaned up" counter additionally back up to Downloads so they
   survive reinstall.
 - **Privacy**: fully offline. No network calls, accounts, ads, analytics.
+
+---
+
+## 13. FIRST-RUN ANIMATION (onboarding explainer)
+
+A full-screen animated explainer that teaches the core Hide-month loop.
+
+**When it shows — mandatory until opted out.** On **every app launch** (cold start, once per
+process), *before* the Home screen and its permission/restore bootstrap, the demo auto-plays. It is
+**mandatory**: no transport controls, Back is blocked, and it must play through to the end. This
+repeats on every launch **until the user opts out**.
+
+**Opting out.** In place of the old "Get started" button, the bottom shows a **"Don't show again"**
+checkbox. A **✕** (top-right) appears only when the demo finishes. At completion:
+- if "Don't show again" is ticked → the window closes itself and the demo never auto-shows again;
+- otherwise → the ✕ lets the user close it (and it auto-shows again next launch).
+
+State is a single prefs flag (`demo opted out`). Cleared on data-clear / reinstall, so a **fresh
+install shows the demo again** (it's tied to the install). Also **replayable** any time from Help's
+"Watch how curating works" button — replay mode is *not* mandatory (Rewind/Play/Pause + ✕ always
+available, no checkbox).
+
+### Layout
+- Title **"How curating works"** + subtitle ("Review a month, hide it, and it steps out of your
+  way — so you never scroll past the same photos again").
+- A faux phone-screen surface containing:
+  - A **progress bar** with a **"{N}% curated"** label to its right (starts "0% curated").
+  - A **caption** line (updates per step).
+  - A **stack of month cards** (March / April / June 2024). Each card has a ▸/▾ arrow + month
+    label + a (hidden) **"Hide month"** pill, and a collapsible grid of **colored tiles, each
+    showing a small picture/emoji** (so it reads as varied content, not blank boxes).
+- Transport controls: **Rewind / Play / Pause**. A primary button reads **"Get started"** on
+  first run, **"Done"** in replay. **Auto-plays on open** (both modes).
+
+### Animation sequence (paced ~1.5–2.4 s per beat)
+1. All three months **collapsed** (headers only) — "Here are your months, waiting to be reviewed."
+   The **middle** month is opened first, then the two ends in random order (so it never runs
+   strictly top→bottom or bottom→top; all three are always opened).
+2. **Open** the first month — the finger taps its header, tiles slide down, card highlights —
+   "Open one and look through its photos."
+3. **Delete a few tiles like the real app**: the counts **{1, 2, 3}** are spread across the three
+   months (which month gets which is random each run), at **random positions** — selected with a
+   **red wash + a white ✓ badge** on each — and a red **"🗑 Delete"** button appears — "Pick the
+   ones you don't want and Delete." Then the tiles are removed and a floating **"Deleted N photos
+   you didn't want to keep"** confirmation pops up. This is deliberate: it shows curation is
+   *prune, then hide*, not just hide.
+4. Show its **Hide month** pill — "Then hide the whole month."
+5. Card **collapses away**; progress → **34% curated** — "It steps out of your way — this app gets cleaner."
+6. Open month 2 → **delete some** → pill → collapse; progress → **67%** ("Next month — delete the junk… then hide it").
+7. Open month 3 → **delete some** → pill → collapse; progress → **100%**.
+8. End state: full bar, **"100% curated"**, caption "All caught up — clean and curated." (green).
+
+A floating **finger** (👆) drives everything: it **taps each month's header to open it**, **taps
+each photo to select it** (the check
+pops on tap, the Delete button appears after the first), then taps **Delete**, then taps **Hide
+month** — synced with each button's own press — so the interaction reads as real taps.
+
+Rewind resets to the all-collapsed 0% state (paused). Pause halts between beats; Play resumes.
+
+▶ **iOS note:** reproduce as a native animated view (e.g. SwiftUI timeline / `withAnimation`),
+auto-playing on first run with the same Rewind/Play/Pause + replay-from-Help affordances.
+
+---
 
 ### Biggest Android→iOS divergences to resolve up front
 1. **Unified grid across Photos + PDFs + audio.** Android MediaStore returns all of these in
