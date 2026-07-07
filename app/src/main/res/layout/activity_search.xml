@@ -49,14 +49,40 @@
             android:clipToPadding="false"
             android:padding="2dp" />
 
-        <TextView
-            android:id="@+id/tvEmpty"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
+            android:orientation="vertical"
             android:gravity="center"
-            android:textColor="@color/on_surface_variant"
-            android:textSize="15sp"
-            android:text="Search file names\nand text inside PDFs" />
+            android:padding="24dp">
+
+            <TextView
+                android:id="@+id/tvEmpty"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:textColor="@color/on_surface_variant"
+                android:textSize="15sp"
+                android:text="Search file names\nand text inside PDFs" />
+
+            <TextView
+                android:id="@+id/tvPlacesLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="Places in your photos"
+                android:textColor="@color/on_surface_variant"
+                android:textSize="13sp"
+                android:visibility="gone" />
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/chipPlaces"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                app:chipSpacing="6dp"
+                app:singleLine="false" />
+        </LinearLayout>
     </FrameLayout>
 </LinearLayout>

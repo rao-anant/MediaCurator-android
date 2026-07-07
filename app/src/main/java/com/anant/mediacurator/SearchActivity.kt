@@ -23,6 +23,9 @@ class SearchActivity : AppCompatActivity() {
     private val viewModel: SearchViewModel by viewModels()
     private lateinit var adapter: GalleryAdapter
 
+    private var showingPrompt = true   // no query yet → the place chips may show
+    private var hasPlaces = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -55,7 +58,10 @@ class SearchActivity : AppCompatActivity() {
             when {
                 res == null -> {                       // no query yet → prompt
                     adapter.submitList(emptyList())
-                    binding.tvEmpty.text = "Search file names\nand text inside PDFs"
+                    binding.tvEmpty.text =
+                        if (PreferencesManager(this).isPlaceSearchEnabled())
+                            "Search file names, PDF text,\nand places"
+                        else "Search file names\nand text inside PDFs"
                     binding.tvEmpty.isVisible = true
                 }
                 res.isEmpty() -> {                     // searched, nothing matched
@@ -68,7 +74,13 @@ class SearchActivity : AppCompatActivity() {
                     adapter.submitList(res)
                 }
             }
+            showingPrompt = res == null
+            updatePromptExtras()
         }
+
+        // Browseable place list → tappable chips shown under the empty-state prompt.
+        viewModel.places.observe(this) { renderPlaces(it) }
+        viewModel.loadPlaces()
 
         binding.btnStats.setOnClickListener { StatsDialog.present(this) }
 
@@ -78,6 +90,30 @@ class SearchActivity : AppCompatActivity() {
     }
 
     override fun onSupportNavigateUp(): Boolean { finish(); return true }
+
+    /** Build the place chips (top cities by photo count). Tapping one runs that search. */
+    private fun renderPlaces(places: List<PlaceCount>) {
+        val group = binding.chipPlaces
+        group.removeAllViews()
+        for (p in places.take(24)) {
+            val chip = com.google.android.material.chip.Chip(this).apply {
+                text = "${p.name} · ${p.count}"
+                isClickable = true
+                isCheckable = false
+                setOnClickListener { binding.searchView.setQuery(p.name, true) }
+            }
+            group.addView(chip)
+        }
+        hasPlaces = group.childCount > 0
+        updatePromptExtras()
+    }
+
+    /** Place chips + label only when the field is empty (the prompt) and we have places. */
+    private fun updatePromptExtras() {
+        val show = showingPrompt && hasPlaces
+        binding.tvPlacesLabel.isVisible = show
+        binding.chipPlaces.isVisible = show
+    }
 
     override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
         menuInflater.inflate(R.menu.menu_search, menu)

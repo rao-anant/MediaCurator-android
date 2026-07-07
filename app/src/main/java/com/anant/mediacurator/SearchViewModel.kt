@@ -26,6 +26,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
 
     private var media: List<MediaItem> = emptyList()
     private var bm25: PdfBm25Index? = null
+    private var placeIndex: Map<Long, List<String>>? = null
     private var ready = false
 
     private var searchJob: Job? = null
@@ -33,13 +34,25 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
     private val _results = MutableLiveData<List<GalleryItem.Media>?>(null)
     val results: LiveData<List<GalleryItem.Media>?> = _results
 
+    // The browseable "places in your library" list (city → count), for the empty-state chips.
+    private val _places = MutableLiveData<List<PlaceCount>>(emptyList())
+    val places: LiveData<List<PlaceCount>> = _places
+
+    fun loadPlaces() {
+        if (!prefs.isPlaceSearchEnabled()) { _places.postValue(emptyList()); return }
+        viewModelScope.launch(Dispatchers.IO) {
+            val store = PlaceStore.getInstance(getApplication<android.app.Application>()).also { it.ensureLoaded() }
+            _places.postValue(store.placeSummary())
+        }
+    }
+
     fun search(query: String) {
         searchJob?.cancel()
         if (query.isBlank()) { _results.value = null; return }   // null → prompt
         searchJob = viewModelScope.launch {
             ensureData()
             val res = withContext(Dispatchers.Default) {
-                SearchEngine.search(query, media, bm25)
+                SearchEngine.search(query, media, bm25, placeIndex)
             }
             _results.postValue(res.mapIndexed { i, r ->
                 GalleryItem.Media(r.item, "", i, r.matchReason.ifBlank { null }, 0)
@@ -55,6 +68,9 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
             bm25   = if (prefs.isPdfContentSearchEnabled())
                          try { PdfBm25Index(pdfIndexStore.loadAll()) } catch (e: Exception) { null }
                      else null
+            placeIndex = if (prefs.isPlaceSearchEnabled())
+                             PlaceStore.getInstance(getApplication()).also { it.ensureLoaded() }.toSearchIndex()
+                         else null
         }
         ready = true
     }

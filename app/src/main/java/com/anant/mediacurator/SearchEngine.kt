@@ -69,7 +69,9 @@ object SearchEngine {
     fun search(
         query: String,
         allMedia: List<MediaItem>,
-        bm25Index: PdfBm25Index? = null
+        bm25Index: PdfBm25Index? = null,
+        // media id → offline reverse-geocoded place names (city + aliases + region) for Place search.
+        placeIndex: Map<Long, List<String>>? = null
     ): List<Result> {
         val tokens = tokenise(query)
         if (tokens.isEmpty()) return emptyList()
@@ -83,15 +85,19 @@ object SearchEngine {
 
         for (item in allMedia) {
             val fileTokens = filenameTokens(item.displayName)
+            val placeNames = placeIndex?.get(item.id).orEmpty()   // reverse-geocoded city + aliases
+            val placeWords = placeWordTokens(placeNames)
 
             val matchedFileparts = mutableListOf<String>()
             var totalScore       = 0f
             var allTokensMatched = true
             var pdfBm25Total     = 0f   // accumulated BM25 contribution across tokens
+            var placeMatched     = false
 
             for (token in tokens) {
                 var bestScore    = 0f
                 var bestFilePart = ""
+                var bestIsPlace  = false
 
                 // --- filename token candidates: no confidence weight ---
                 // Skip purely-numeric query tokens for photos/videos — they match the long
@@ -102,18 +108,26 @@ object SearchEngine {
                 if (item.type == MediaType.PDF || !numericToken) {
                     for (part in fileTokens) {
                         val s = fuzzyScore(token, part)
-                        if (s > bestScore) { bestScore = s; bestFilePart = part }
+                        if (s > bestScore) { bestScore = s; bestFilePart = part; bestIsPlace = false }
                     }
                 }
 
+                // --- place candidates: offline reverse-geocoded city name + aliases + region ---
+                // Matched like filename words, so "bengaluru"/"bangalore"/"karnataka" all hit.
+                for (w in placeWords) {
+                    val s = fuzzyScore(token, w)
+                    if (s > bestScore) { bestScore = s; bestFilePart = ""; bestIsPlace = true }
+                }
+
                 // --- PDF content: BM25 inverted-index lookup ---
-                // Only checked when label/filename didn't already clear the threshold.
+                // Only checked when label/filename/place didn't already clear the threshold.
                 if (bestScore < MIN_SCORE && item.type == MediaType.PDF) {
                     val bm25Component = pdfTokenBm25[token]?.get(item.id) ?: 0f
                     if (bm25Component > 0f) {
                         // Term present in the BM25 index for this PDF → content match
                         bestScore    = 0.75f   // passes MIN_SCORE; final rank from pdfBm25Total
                         bestFilePart = ""
+                        bestIsPlace  = false
                         pdfBm25Total += bm25Component
                     }
                 }
@@ -122,21 +136,27 @@ object SearchEngine {
                 if (bestScore < MIN_SCORE) { allTokensMatched = false; break }
 
                 totalScore += bestScore
-                if (bestFilePart.isNotEmpty()) matchedFileparts.add(bestFilePart)
+                when {
+                    bestIsPlace               -> placeMatched = true
+                    bestFilePart.isNotEmpty() -> matchedFileparts.add(bestFilePart)
+                }
             }
 
             if (!allTokensMatched) continue
 
             // Use normalised BM25 total as the score for pure content matches so that
             // PDFs with more / rarer term occurrences rank above weaker matches.
-            val avgScore = if (pdfBm25Total > 0f && matchedFileparts.isEmpty()) {
+            val avgScore = if (pdfBm25Total > 0f && matchedFileparts.isEmpty() && !placeMatched) {
                 minOf(pdfBm25Total / (tokens.size * BM25_SCORE_SCALE), 1.0f)
             } else {
                 totalScore / tokens.size
             }
 
             val pdfContentMatch = pdfBm25Total > 0f
-            val reason = buildReason(matchedFileparts, item.displayName, pdfContentMatch)
+            val reason = buildReason(
+                matchedFileparts, item.displayName, pdfContentMatch,
+                if (placeMatched) placeNames.firstOrNull() else null
+            )
             results.add(Result(item, reason, avgScore))
         }
 
@@ -244,14 +264,23 @@ object SearchEngine {
     private fun buildReason(
         fileParts: List<String>,
         fullFilename: String,
-        pdfContentMatch: Boolean = false
+        pdfContentMatch: Boolean = false,
+        place: String? = null
     ): String {
         return when {
             fileParts.isNotEmpty() ->
                 "≈ ${fullFilename.substringBeforeLast('.').take(20)}"
             pdfContentMatch ->
                 "📄 content (first 5 pg)"
+            place != null ->
+                "📍 $place"
             else -> ""
         }
     }
+
+    /** Lowercased word tokens from a place's names (city + aliases + region), for fuzzy matching. */
+    private fun placeWordTokens(names: List<String>): List<String> =
+        names.flatMap { it.lowercase().split(Regex("[^\\p{L}\\p{Nd}]+")) }
+             .filter { it.length >= 2 }
+             .distinct()
 }

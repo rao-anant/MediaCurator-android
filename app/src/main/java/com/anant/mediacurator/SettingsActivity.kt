@@ -36,6 +36,19 @@ class SettingsActivity : AppCompatActivity() {
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { importHiddenMonths(it) } }
 
+    private val mediaLocationLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            prefs.setPlaceSearchEnabled(true)
+            binding.switchPlace.isChecked = true
+            toast("Place search on — photos are located in the background as you browse")
+        } else {
+            binding.switchPlace.isChecked = false
+            toast("Location access is needed for place search")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -48,6 +61,9 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.switchPdf.isChecked = prefs.isPdfContentSearchEnabled()
         binding.switchPdf.setOnClickListener { onPdfToggle(binding.switchPdf.isChecked) }
+
+        binding.switchPlace.isChecked = prefs.isPlaceSearchEnabled()
+        binding.switchPlace.setOnClickListener { onPlaceToggle(binding.switchPlace.isChecked) }
 
         binding.btnExport.setOnClickListener { exportHiddenMonths() }
         binding.btnImport.setOnClickListener { importLauncher.launch(arrayOf("application/json", "text/*")) }
@@ -78,6 +94,38 @@ class SettingsActivity : AppCompatActivity() {
         } else {
             prefs.setPdfContentSearchEnabled(true)
             toast("PDF content search enabled — indexing resumes in the app")
+        }
+    }
+
+    // ── Place search ──────────────────────────────────────────────────────────────
+
+    private fun onPlaceToggle(nowEnabled: Boolean) {
+        if (nowEnabled) {
+            val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.ACCESS_MEDIA_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                prefs.setPlaceSearchEnabled(true)
+                toast("Place search on — photos are located in the background as you browse")
+            } else {
+                // Ask for photo-location access; the launcher enables (or reverts the switch).
+                mediaLocationLauncher.launch(android.Manifest.permission.ACCESS_MEDIA_LOCATION)
+            }
+        } else {
+            AlertDialog.Builder(this)
+                .setTitle("Turn off place search?")
+                .setMessage(
+                    "Search will no longer match photos by place, and the locations stored on this " +
+                    "device will be cleared. Your photos are not affected."
+                )
+                .setPositiveButton("Turn off") { _, _ ->
+                    prefs.setPlaceSearchEnabled(false)
+                    Thread { PlaceStore.getInstance(applicationContext).clear() }.start()
+                    toast("Place search off")
+                }
+                .setNegativeButton("Cancel") { _, _ -> binding.switchPlace.isChecked = true }
+                .setOnCancelListener { binding.switchPlace.isChecked = true }
+                .show()
         }
     }
 

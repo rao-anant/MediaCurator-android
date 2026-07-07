@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Place search (opt-in): read a photo's own GPS EXIF to reverse-geocode it OFFLINE (bundled
+         GeoNames data — no network). Requested at runtime only when the user enables Place search
+         in Settings; the app declares NO INTERNET permission, so location never leaves the device. -->
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <!-- Required on Android 13+ to browse PDF files stored by other apps (Downloads, Documents,

@@ -144,6 +144,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     // ── Photo duplicate detection ─────────────────────────────────────────────
     val photoHashStore = PhotoHashStore.getInstance(app)
     private var photoHashingJob: Job? = null
+    private var placeIndexingJob: Job? = null
     // Non-null when hashing was deferred because MANAGE_EXTERNAL_STORAGE was not yet
     // granted on a fresh install/reinstall.  Call resumeDeferredHashing() once the
     // permission flow completes (grant or skip).
@@ -689,6 +690,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.Main) {
                     // Photos AND videos are hashed for duplicate detection; PDF indexing runs first.
                     startPdfIndexingInBackground(pdfs, images + videos)
+                    // Place search (opt-in): reverse-geocode photo GPS in the background.
+                    startPlaceIndexingInBackground(images)
                 }
             }
 
@@ -1135,6 +1138,30 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
      *                    indexing completes (or immediately if PDF indexing is disabled / has
      *                    nothing to do).  Never runs both jobs concurrently.
      */
+    /**
+     * Reverse-geocode photos' GPS to place names for Place search (v1.1). Independent of the
+     * PDF→hash chain; a no-op unless the user enabled Place search AND granted ACCESS_MEDIA_LOCATION.
+     * Incremental + resumable (PlaceStore skips already-scanned photos).
+     */
+    fun startPlaceIndexingInBackground(images: List<MediaItem>) {
+        placeIndexingJob?.cancel()
+        val app = getApplication<android.app.Application>()
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+            app, android.Manifest.permission.ACCESS_MEDIA_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (images.isEmpty() || !prefs.isPlaceSearchEnabled() || !granted) return
+        placeIndexingJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                PlaceIndexer.indexImages(
+                    app, images, PlaceStore.getInstance(app),
+                    shouldContinue = { isActive }
+                )
+            } catch (e: Exception) {
+                Log.e("GalleryViewModel", "place indexing failed", e)
+            }
+        }
+    }
+
     fun startPdfIndexingInBackground(pdfs: List<MediaItem>, mediaToHash: List<MediaItem> = emptyList()) {
         pdfIndexingJob?.cancel()
         if (pdfs.isEmpty() || !prefs.isPdfContentSearchEnabled()) {
