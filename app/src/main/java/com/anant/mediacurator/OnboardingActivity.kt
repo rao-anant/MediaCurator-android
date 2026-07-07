@@ -565,6 +565,10 @@ class OnboardingActivity : AppCompatActivity() {
 
     private fun optOutAndFinish() {
         prefs.setDemoDisabled()
+        // Persist the opt-out durably so it survives uninstall/reinstall (SharedPreferences doesn't).
+        // HomeActivity re-applies it on the next fresh install. Off the main thread (MediaStore/file).
+        val app = applicationContext
+        Thread { OnboardingMarker.write(app) }.start()
         finish()
     }
 

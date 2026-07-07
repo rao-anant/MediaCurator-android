@@ -145,6 +145,17 @@ of them wrong. The iOS list view must honour them:
   re-saved**, silently undoing the reset. (Android uses a process-wide `CurationResetSignal` epoch the
   gallery consumes on resume.)
 
+- **G-5 — Land an opened month / sub-group *below* the sticky header, not at absolute top.**
+  The sticky Year strip is an overlay pinned at the top; scrolling an opened month to offset 0 puts
+  its header *under* that strip, hiding it (the user then sees only the year, not the month). Offset
+  the scroll by the sticky strip's height so the month header sits just below it. A **Year** header
+  instead lands at offset 0 — the sticky strip hides when a year row is itself the top row.
+
+- **G-6 — Opening a sub-group scrolls its parent month to the top, like a month open.**
+  Treat a sub-group (Camera & Others / WhatsApp) expand like a month expand: resolve its parent month
+  and scroll that month's header to the top (offset per G-5), so opening WhatsApp surfaces the sibling
+  (unopened) "Camera & Others" line right under the month header. Fires only on expand, never collapse.
+
 ---
 
 ## 4. Reset coverage
@@ -168,6 +179,19 @@ once).
 ## 5. First-run access + demo ordering (flow regression)
 
 On the very first launch the order must be: **media-permission request → all-files-access request →
-mandatory demo → home/restore**. The demo must never appear before the access prompts. The demo is
-mandatory (not dismissable) until the user ticks "Don't show again"; that opt-out is cleared by a
-data-clear/reinstall so a fresh install shows the demo again. Reset progress also re-enables the demo.
+"Restore your progress?" offer (if a backup exists) → mandatory demo**. The restore offer must come
+**before** the demo — a returning user's restore prompt must never be buried behind it — and the demo
+must never appear before the access prompts. The demo is mandatory (not dismissable) until the user
+ticks "Don't show again".
+
+- **FR-1 — Ordering race.** The hidden-months backup is read **off the main thread**, so the demo
+  launch must be **deferred to that read's completion**, and guarded against a re-entrant `onStart`.
+  Returning from the all-files Settings screen fires **both** a result callback **and** `onStart`; the
+  second call must not race the demo ahead of the pending async restore dialog. (An in-flight flag
+  gates it.) Symptom when wrong: demo appears first, restore dialog second — looks like no change.
+- **FR-2 — Durable opt-out survives reinstall.** "Don't show again" is written to prefs **and** a
+  marker file in Downloads. On a fresh install Home reads that marker (needs all-files access, same as
+  progress-restore) and re-applies the opt-out — so a user who opted out is **not** shown the demo
+  again after reinstall. A user who **never** opted out still sees it.
+- **FR-3 — Reset** re-enables the demo for the current install (via the prefs flag; the cross-install
+  Downloads marker is orthogonal and not touched by reset).

@@ -58,6 +58,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingOpenSearch = false          // Home "Search" card: expand search once the menu exists
     private var pendingShowStats = false           // Home "Hidden & stats" card: show stats once loaded
     private var pendingScrollToTopMonth: String? = null  // month just opened → scroll its header to top
+    private var pendingScrollToTopYear: Int? = null      // year just opened → scroll its header to top
 
     // Released once the durable "demo already shown" marker has been consulted — blocks the
     // first-run demo from flashing on a reinstall before that read completes.
@@ -340,7 +341,15 @@ class MainActivity : AppCompatActivity() {
     private fun setupRecyclerView() {
         val spanCount = 4
         adapter = GalleryAdapter(
-            onYearToggle     = { year     -> viewModel.toggleYearExpansion(year) },
+            onYearToggle     = { year     ->
+                // Opening a year (not collapsing) → bring that year's header to the top, so the user
+                // sees it from the start of its months rather than expanding in place mid-screen.
+                val willExpand = adapter.currentList.none {
+                    it is GalleryItem.YearHeader && it.year == year && it.isExpanded
+                }
+                if (willExpand) pendingScrollToTopYear = year
+                viewModel.toggleYearExpansion(year)
+            },
             onMonthToggle    = { monthKey ->
                 // Opening a month (not collapsing) → land at its TOP once the list rebuilds, so the
                 // user sees it from the first photo (the accordion/relayout would otherwise leave
@@ -351,7 +360,22 @@ class MainActivity : AppCompatActivity() {
                 if (willExpand) pendingScrollToTopMonth = monthKey
                 viewModel.toggleMonthExpansion(monthKey)
             },
-            onSubGroupToggle = { subKey   -> viewModel.toggleSubGroupExpansion(subKey) },
+            onSubGroupToggle = { subKey   ->
+                // Opening a sub-group (Camera/WhatsApp) is treated like opening its month: bring the
+                // MONTH header to the top so the user sees the month from its start. With the month
+                // header just under the sticky year strip, the "Camera & Others" line sits right below
+                // it — so opening WhatsApp still surfaces Camera (unopened) so its existence is obvious.
+                val willExpand = adapter.currentList.none {
+                    it is GalleryItem.SubHeader && it.subKey == subKey && it.isExpanded
+                }
+                if (willExpand) {
+                    pendingScrollToTopMonth = adapter.currentList
+                        .filterIsInstance<GalleryItem.SubHeader>()
+                        .firstOrNull { it.subKey == subKey }?.monthKey
+                        ?: subKey.substringBeforeLast(":")
+                }
+                viewModel.toggleSubGroupExpansion(subKey)
+            },
             onMediaClick  = { item ->
                 if (item.type == MediaType.PDF) {
                     val uri = Uri.parse(item.uri)
@@ -585,6 +609,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Height of the pinned sticky year strip, in px. Used as a scroll offset so a freshly-opened
+     * month header lands just below the strip instead of hidden behind it. Reads the row's laid-out
+     * height, falling back to its 60dp design height.
+     */
+    private fun stickyHeaderOffset(): Int =
+        binding.stickyYearRow.layoutParams?.height?.takeIf { it > 0 }
+            ?: (60 * resources.displayMetrics.density).toInt()
+
+    /**
      * Keep the list and the floating bottom bar separate: pad the RecyclerView's bottom by the bar's
      * height so the last months/year can scroll clear of the bar/coach-mark instead of hiding behind
      * it. (clipToPadding=false in the layout lets items scroll into the padding region.)
@@ -713,8 +746,11 @@ class MainActivity : AppCompatActivity() {
                         val hp = curr.indexOfFirst { it is GalleryItem.Header && it.monthKey == key }
                         val fp = curr.indexOfFirst { it is GalleryItem.Footer && it.monthKey == key }
                         if (hp >= 0) {
+                            // Land the month header just BELOW the sticky year strip, not at y=0 —
+                            // otherwise the pinned "2018" row overlays and hides the month header the
+                            // user just opened (they'd see only the year, not "January 2018").
                             (binding.recyclerView.layoutManager as? GridLayoutManager)
-                                ?.scrollToPositionWithOffset(hp, 0)
+                                ?.scrollToPositionWithOffset(hp, stickyHeaderOffset())
                         }
                         // Start the walk fresh FROM THE TOP: header just scrolled into view (seen),
                         // footer not yet — so a long month must still be scrolled to the end. This
@@ -722,6 +758,24 @@ class MainActivity : AppCompatActivity() {
                         if (hp >= 0 && fp >= 0) walk.onOpenedAtTop(key, fp - hp)
                         pendingScrollToTopMonth = null
                         updateHideBarWhenSettled()
+                    }
+                }
+            }
+            // A year the user just opened → bring its header to the top (same as months). No sticky
+            // offset needed: when a year header is the first visible row, the sticky strip hides, so
+            // the real year header sits fully at the top.
+            pendingScrollToTopYear?.let { year ->
+                if (items.any { it is GalleryItem.YearHeader && it.year == year }) {
+                    binding.appBarLayout.setExpanded(true, false)
+                    binding.recyclerView.doOnPreDraw {
+                        val yp = adapter.currentList.indexOfFirst {
+                            it is GalleryItem.YearHeader && it.year == year
+                        }
+                        if (yp >= 0) {
+                            (binding.recyclerView.layoutManager as? GridLayoutManager)
+                                ?.scrollToPositionWithOffset(yp, 0)
+                        }
+                        pendingScrollToTopYear = null
                     }
                 }
             }
@@ -1404,10 +1458,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateEndReached() {
-        // A month was just opened and we're about to scroll its header to the top — don't evaluate
+        // A month/year was just opened and we're about to scroll to the top — don't evaluate
         // "reached end" against the transient pre-scroll viewport (its footer may be momentarily
         // visible). The scroll-to-top callback re-establishes a fresh walk once it lands.
-        if (pendingScrollToTopMonth != null) return
+        if (pendingScrollToTopMonth != null || pendingScrollToTopYear != null) return
         // Don't evaluate "reached end" against a list that's mid-rebuild or animating. During the
         // accordion expand the newly-opened month's items insert/animate in, and for a moment its
         // footer sits just below the header (only a few rows laid out) — evaluating then would latch

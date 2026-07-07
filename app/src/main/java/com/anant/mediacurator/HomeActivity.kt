@@ -38,6 +38,7 @@ class HomeActivity : AppCompatActivity() {
     // Guards so the per-onStart bootstrap does its file work at most once per session.
     private var launchedAllFilesSettings = false
     private var restoreChecked = false
+    private var restoreInFlight = false   // backup read running → don't let a re-entrant call show the demo early
 
     // Home is the launcher, so it owns BOTH permission requests: the READ_MEDIA gate below,
     // and (up front) the All-files-access prompt that the gallery used to ask lazily. Asking
@@ -51,14 +52,14 @@ class HomeActivity : AppCompatActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) {
         launchedAllFilesSettings = false
-        maybeShowDemoThenRestore()   // All-files decided — now the demo, then the restores
+        maybeRestoreThenShowDemo()   // All-files decided — now the restore offer, then the demo
     }
 
     // The mandatory first-run demo plays AFTER every access request has been sought (media
-    // permission + All-files access); when it closes we run the restores.
+    // permission + All-files access) AND after the restore offer has been shown/resolved.
     private val demoLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { runRestores() }
+    ) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -116,7 +117,7 @@ class HomeActivity : AppCompatActivity() {
     /**
      * The All-files access request (the second access prompt). On Android 11+ without the
      * permission, show the rationale ONCE and send the user to Settings. Once it's decided —
-     * or if it isn't needed — we fall through to the demo, then the restores.
+     * or if it isn't needed — we fall through to the restore offer, then the demo.
      */
     private fun requestAllFilesAccess() {
         val needsAllFiles = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
@@ -125,21 +126,49 @@ class HomeActivity : AppCompatActivity() {
             prefs.setAllFilesPromptShown()
             showAllFilesRationale()
         } else {
-            maybeShowDemoThenRestore()
+            maybeRestoreThenShowDemo()
         }
     }
 
     /**
-     * With every access request sought, play the mandatory demo (once per launch, unless the user
-     * opted out) and defer the restores until it closes. Otherwise restore straight away.
+     * With every access request sought, run the restores FIRST — the deletion counter (sync) and the
+     * hidden-months backup, which may offer "Restore your progress?" — and only once that offer has
+     * been shown/resolved play the mandatory demo. This puts the restore prompt BEFORE the demo.
      */
-    private fun maybeShowDemoThenRestore() {
+    private fun maybeRestoreThenShowDemo() {
+        DeletionStatsStore.getInstance(this).ensureRestored()
+        // Re-entrant: the all-files Settings return fires BOTH the launcher callback and onStart. If a
+        // backup read is already running, don't let the second call race ahead and launch the demo
+        // before the pending restore offer — the read's completion shows the demo once it's decided.
+        if (restoreInFlight) return
+        if (restoreChecked) { showDemoIfNeeded(); return }
+        restoreChecked = true
+        // Only look for a hidden-months backup if we haven't already offered, and there are no
+        // hidden months locally (fresh install / reinstall). Read off the main thread.
+        if (prefs.wasHiddenRestoreOffered() || prefs.getDoneMonths().isNotEmpty()) {
+            showDemoIfNeeded(); return
+        }
+        restoreInFlight = true
+        Thread {
+            val months = HiddenMonthsBackup.read(this)
+            // The durable "Don't show again" marker survives reinstall (SharedPreferences doesn't);
+            // re-apply it here so a returning user who opted out isn't shown the demo again.
+            val optedOutBefore = OnboardingMarker.exists(this)
+            runOnUiThread {
+                restoreInFlight = false
+                if (optedOutBefore) prefs.setDemoDisabled()
+                if (months != null) offerHiddenRestore(months) { showDemoIfNeeded() }
+                else showDemoIfNeeded()
+            }
+        }.start()
+    }
+
+    /** Play the mandatory demo once per launch, unless the user opted out. */
+    private fun showDemoIfNeeded() {
         if (!demoShownThisLaunch && !prefs.isDemoDisabled()) {
             demoShownThisLaunch = true
             demoLauncher.launch(Intent(this, OnboardingActivity::class.java))
-            return
         }
-        runRestores()
     }
 
     private fun showAllFilesRationale() {
@@ -163,28 +192,14 @@ class HomeActivity : AppCompatActivity() {
             // Fires for Not-now / back / outside-tap. Allow also dismisses, but then the
             // Settings screen is handling it — allFilesLauncher continues on return.
             .setOnDismissListener {
-                if (!launchedAllFilesSettings) maybeShowDemoThenRestore()
+                if (!launchedAllFilesSettings) maybeRestoreThenShowDemo()
             }
             .show()
     }
 
-    /** Restore the deletion counter (sync, internally guarded) and the hidden-months list. */
-    private fun runRestores() {
-        DeletionStatsStore.getInstance(this).ensureRestored()
-        if (restoreChecked) return
-        restoreChecked = true
-        // Only look for a hidden-months backup if we haven't already offered, and there are
-        // no hidden months locally (fresh install / reinstall). Read off the main thread.
-        if (prefs.wasHiddenRestoreOffered() || prefs.getDoneMonths().isNotEmpty()) return
-        Thread {
-            val months = HiddenMonthsBackup.read(this)
-            if (months != null) runOnUiThread { offerHiddenRestore(months) }
-        }.start()
-    }
-
-    private fun offerHiddenRestore(months: Set<String>) {
-        if (isFinishing || isDestroyed) return
-        if (prefs.getDoneMonths().isNotEmpty()) return   // raced with the gallery — already restored
+    private fun offerHiddenRestore(months: Set<String>, onDone: () -> Unit) {
+        if (isFinishing || isDestroyed) { onDone(); return }
+        if (prefs.getDoneMonths().isNotEmpty()) { onDone(); return }   // raced — already restored
         prefs.setHiddenRestoreOffered()
         AlertDialog.Builder(this)
             .setTitle("Restore your progress?")
@@ -197,6 +212,7 @@ class HomeActivity : AppCompatActivity() {
                 viewModel.load()   // recompute reviewed / hidden counts
             }
             .setNegativeButton("Not now", null)
+            .setOnDismissListener { onDone() }
             .show()
     }
 

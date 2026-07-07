@@ -83,6 +83,9 @@ storage bootstrap.
      has no local hidden months yet, offer:
      - Dialog **"Restore your progress?"** — "Found a saved list of N hidden months from a
        previous install. Hide them again…?" Buttons **Restore** / **Not now**. Offered once.
+   - **Then** the mandatory first-run demo (§13) plays — *after* the access prompts **and** the
+     restore offer have been shown/resolved, so the restore prompt is never buried behind the demo.
+     (Ordering guarded so a re-entrant `onStart` can't race the demo ahead of the async restore read.)
 
 ▶ **iOS note:** iOS has no "All files access" or `MANAGE_EXTERNAL_STORAGE`. PDFs/audio come
 from the Files app / document picker, not a global permission. The cross-reinstall backup
@@ -255,9 +258,17 @@ When the gallery opens via Home's Resume/Start, it lands using these rules, in o
 month is saved as the top-of-viewport month on leave (skipped in flat Largest-overall mode). Net
 effect: leave mid-library, come back, and you're where you left off — even across Home round-trips.
 
-**Opening a month lands at its top.** Tapping a month header to expand it scrolls that month's
-header to the top so the user starts from its first photos — not left mid/end after the accordion
-collapse + relayout shift the viewport. (The scroll runs after the list is laid out.)
+**Opening a month, year, or sub-group lands it at the top.** Tapping a header to **expand** it (not
+collapse) scrolls that item up so the user starts from its beginning — not left mid/end after the
+accordion collapse + relayout shift the viewport:
+- **Month / sub-group** headers land just **below the sticky Year strip** (offset by the strip's
+  height) so the month label stays visible instead of being hidden behind the pinned year row.
+  Opening a **sub-group** (Camera & Others / WhatsApp) scrolls its **parent month** to the top — so
+  opening WhatsApp still surfaces the (unopened) "Camera & Others" line right under the month header,
+  making its existence obvious.
+- **Year** headers land at the very top (offset 0 — the sticky strip hides when a year row is the top row).
+- Fires only on **expand**, never on collapse. An item near the very end of the whole list rises as
+  far as it can (nothing below it to scroll against). The scroll runs after the list is laid out.
 
 ### Sticky header
 As the user scrolls, a sticky overlay shows the current Year (always), Month (when scrolled
@@ -565,19 +576,25 @@ Find duplicates, Search, Select & act, Stats anywhere, Private by design. Footer
 A full-screen animated explainer that teaches the core Hide-month loop.
 
 **When it shows — mandatory until opted out.** On **every app launch** (cold start, once per
-process), *before* the Home screen and its permission/restore bootstrap, the demo auto-plays. It is
-**mandatory**: no transport controls, Back is blocked, and it must play through to the end. This
-repeats on every launch **until the user opts out**.
+process) the demo auto-plays — but **after** Home's access prompts (media + All-files) **and** after
+the "Restore your progress?" offer has been shown/resolved, so a returning user's restore prompt is
+never buried behind the demo. It is **mandatory**: no transport controls, Back is blocked, and it
+must play through to the end. This repeats on every launch **until the user opts out**.
 
 **Opting out.** In place of the old "Get started" button, the bottom shows a **"Don't show again"**
 checkbox. A **✕** (top-right) appears only when the demo finishes. At completion:
 - if "Don't show again" is ticked → the window closes itself and the demo never auto-shows again;
 - otherwise → the ✕ lets the user close it (and it auto-shows again next launch).
 
-State is a single prefs flag (`demo opted out`). Cleared on data-clear / reinstall, so a **fresh
-install shows the demo again** (it's tied to the install). Also **replayable** any time from Help's
-"Watch how curating works" button — replay mode is *not* mandatory (Rewind/Play/Pause + ✕ always
-available, no checkbox).
+State is a prefs flag (`demo opted out`), mirrored by a **durable marker file in Downloads** so the
+opt-out **survives uninstall/reinstall** (SharedPreferences alone is wiped on reinstall). On a fresh
+install Home reads that marker (via the same All-files access used for progress-restore) and
+re-applies the opt-out. A user who **never** opted out still sees the demo again after a reinstall.
+Also **replayable** any time from Help's "Watch how curating works" button — replay mode is *not*
+mandatory (Rewind/Play/Pause + ✕ always available, no checkbox).
+
+▶ **iOS note:** the durable opt-out maps to iCloud key-value / a Documents marker; there's no
+`MANAGE_EXTERNAL_STORAGE` equivalent, so persistence rides on the same store as the progress backup.
 
 ### Layout
 - Title **"How curating works"** + subtitle ("Review a month, hide it, and it steps out of your
