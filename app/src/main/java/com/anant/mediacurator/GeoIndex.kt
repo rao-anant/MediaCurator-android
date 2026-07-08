@@ -25,9 +25,11 @@ data class GeoCity(
     val country: String = "",
     val admin1: String = ""
 ) {
-    /** Every token worth feeding into the search index for this place. */
+    /** Every token worth feeding into the search index for this place (city, aliases, state, country). */
     val searchNames: List<String>
-        get() = (listOf(name) + altNames + listOfNotNull(admin1.ifBlank { null })).distinct()
+        get() = (listOf(name) + altNames +
+                 listOfNotNull(admin1.ifBlank { null }) +
+                 listOfNotNull(country.ifBlank { null })).distinct()
 
     /** e.g. "Bengaluru, Karnataka" — for display. */
     val label: String get() = if (admin1.isBlank()) name else "$name, $admin1"

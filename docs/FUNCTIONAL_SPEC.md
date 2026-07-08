@@ -451,37 +451,44 @@ Dedicated standalone screen (no gallery behind it; Back → Home).
 search over Photos assets is limited (assets don't have meaningful filenames); scope search to
 PDFs/Files-app docs + any available metadata.
 
-### Planned (v1.1): Place search — offline reverse-geocoding
+### v1.1: Place search — offline reverse-geocoding
 
-**Status: designed, not yet built. Deferred past v1.0** to avoid adding a second sensitive permission
-during the initial Play review. Search photos by the **place** they were taken (city name), **fully
-offline** so the "no internet, ever / nothing leaves your device" promise is preserved.
+**Built (v1.1, versionCode 23; on the `place-search` branch, not yet merged/shipped).** Search **and**
+browse photos by the **place** they were taken, **fully offline** so the "no internet, ever / nothing
+leaves your device" promise holds. **On by default** (a Settings toggle turns it off and clears the
+local place cache).
 
-- **Data source.** Bundle the GeoNames `cities15000` dataset (~sub-1 MB, trimmed to name + alternate
-  names + lat/long + country/admin) in app assets. CC-BY — credit "GeoNames" in About/Help. (Use
-  cities500/1000 for town-level coverage at a few MB.) The **same dataset file ships to both platforms.**
-- **Indexing** (background, like PDF/hash indexing): read each photo's EXIF GPS, map to the **nearest
-  city** via a k-d tree over the dataset, store the place name, and feed it into the existing fuzzy
-  search index. The alternate-names column resolves Bangalore↔Bengaluru, Mumbai↔Bombay.
-- **Browse the places.** The same per-photo index is aggregated into a ranked "places in your photos"
-  list (city → photo count), shown as tappable chips on the Search screen's empty state — tap a city
-  to search it. So places are both **searchable** and **browseable**. (`PlaceStore.summarize`, unit-tested.)
-- **Why offline (not the OS geocoder).** Both platforms' built-in reverse geocoders are
-  **network-backed** (`android.location.Geocoder`, `CLGeocoder`); using either would break the
-  absolute no-network claim and force a location declaration on the store privacy forms. The bundled
-  k-d-tree lookup does it with **zero network**.
-- **Reading GPS — platform differences:**
-  - **Android:** needs `ACCESS_MEDIA_LOCATION` **+** `MediaStore.setRequireOriginal(uri)` (Q+ redacts
-    location by default). This is the second sensitive permission — the reason the feature waited.
-  - ▶ **iOS:** `PHAsset.location` returns a `CLLocation` directly under normal Photos access — no
-    redaction dance, no extra permission. "Limited" photo access reduces which assets are visible (and
-    thus locatable); handle it. The no-internet guarantee is a **promise** here (iOS has no manifest
-    switch like Android's absent `INTERNET` permission) — kept by never calling out; verify with a
-    network-sandbox test and the "no data collected" App Privacy label.
-- **Shared core.** GeoNames parse + k-d tree + nearest-city + fuzzy-match is platform-independent —
-  spec once, mirror in Kotlin/Swift (same pattern as the pure `CurationLogic` walk-gate rules).
-- **Accuracy / limits (both platforms):** city-level, not neighborhood; only GPS-tagged photos match
-  (WhatsApp / screenshots / downloads strip EXIF — universal). Place names never leave the device.
+- **Data source.** Bundle GeoNames `cities500` (~235k places >500 pop), trimmed to
+  `name|alt|lat|lon|country|admin1` (~5–6 MB in the AAB). CC-BY — credited in Settings. A second tiny
+  asset maps country-name→ISO code for flag emoji. Built by `scripts/trim_geonames.ps1` (tier is a
+  param). The same dataset ships to both platforms.
+- **Permission.** `ACCESS_MEDIA_LOCATION`, requested once up front on Home (place search is default-on)
+  and again from the Settings toggle. **Read-only** — the app never writes to photos.
+- **Indexing** (background, alongside PDF/hash indexing; gated by the toggle + permission): read each
+  photo's EXIF GPS via `MediaStore.setRequireOriginal` (Q+), map to the **nearest city** on a **3-D
+  unit-sphere k-d tree** (correct across the antimeridian and poles), and store `city / state / country`
+  per photo in `PlaceStore` (empty value = "scanned, no GPS", so it isn't re-read). No network.
+- **Search** matches city + aliases + state + country, **diacritic-normalized** (Turkish "İmrahor" →
+  "imrahor", "München" → "munchen"), typo-tolerant. Aliases resolve Bangalore↔Bengaluru, Bombay↔Mumbai.
+- **Browse** — two entry points on Home (gated: dimmed until ≥1 place is indexed):
+  - **Browse by location (A):** a flat, ranked list of **city** chips (🏙️) — tap for its photos.
+  - **Drill down by location (B):** **country** (real flag 🇩🇪) → **state** (🚩) → **city** (🏙️), with
+    a **teal clickable breadcrumb** (Germany › Hesse › Kelsterbach) shown while drilling and over the
+    photos — each segment navigates. City-states (no admin level, e.g. Singapore) show cities directly
+    under the country. Phone **Back walks up one level**; the ‹ toolbar arrow jumps to Home.
+  - A **sort toggle** (most-photos ⇄ A–Z) applies to both. Counts are pruned to the live library so a
+    place's count matches what a tap returns. (A tree-view "Option C" was prototyped and dropped.)
+- **Why offline (not the OS geocoder).** Both platforms' reverse geocoders are **network-backed**
+  (`android.location.Geocoder`, `CLGeocoder`); either would break the no-network claim and force a
+  location declaration on the store privacy forms. The bundled k-d-tree lookup does it with zero network.
+- ▶ **iOS:** `PHAsset.location` gives a `CLLocation` directly under normal Photos access — no redaction
+  dance, no extra permission (handle "limited" access). The no-internet guarantee is a **promise** (no
+  manifest switch like Android's absent `INTERNET`) — kept by never calling out; verify with a
+  network-sandbox test + the "no data collected" App Privacy label.
+- **Shared core.** GeoNames parse + k-d tree + nearest-city + `PlaceBrowse` aggregation + fuzzy/normalized
+  match are platform-independent — mirror in Kotlin/Swift (same pattern as the pure `CurationLogic` rules).
+- **Accuracy / limits:** city-level, not neighborhood/POI; only GPS-tagged photos match (WhatsApp /
+  screenshots / downloads strip EXIF — universal). Place data never leaves the device.
 
 ---
 

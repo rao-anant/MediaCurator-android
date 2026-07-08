@@ -195,3 +195,48 @@ ticks "Don't show again".
   again after reinstall. A user who **never** opted out still sees it.
 - **FR-3 — Reset** re-enables the demo for the current install (via the prefs flag; the cross-install
   Downloads marker is orthogonal and not touched by reset).
+
+---
+
+## 6. Place search (v1.1) — pure logic
+
+Offline reverse-geocoding + browse. The pure pieces (`GeoIndex`, `SearchEngine` place matching,
+`PlaceBrowse`) are JVM-unit-tested (`GeoIndexTest`, `SearchEnginePlaceTest`, `PlaceSummaryTest`) and
+must be mirrored on iOS.
+
+### Nearest-city (`GeoIndex`, 3-D unit-sphere k-d tree)
+
+| ID | Scenario | Expected |
+|----|----------|----------|
+| **GI-1** | A point near a known city (any hemisphere, +/− longitude). | Returns that city. |
+| **GI-2** | Two cities straddling the antimeridian (lon +179 vs −179); query just east of +179. | Returns the +179 city, **not** the −179 one (the bug a naïve 2-D lon tree hits). |
+| **GI-3** | Empty dataset. | Returns null. |
+| **GI-4** | Trimmed line `name\|alt,alt\|lat\|lon\|country\|admin1`; blank/`#` lines. | Parsed to a city with alt names; malformed/comment lines skipped. |
+
+### Place matching (`SearchEngine`, with `placeIndex`)
+
+| ID | Scenario | Expected |
+|----|----------|----------|
+| **PS-1** | Query = city / alias / region / country of an indexed photo. | Photo matches (Bangalore→Bengaluru, Bombay→Mumbai, "karnataka", "india"). |
+| **PS-2** | Multi-word place ("New York"); query a single word ("york"). | Matches. |
+| **PS-3** | Diacritics / non-Latin case: query "imrahor" or "İmrahor" for a photo tagged **İmrahor**; "munchen" for **München**. | Matches. ⚠️ *Lowercasing "İ" inserts a combining dot the tokenizer splits on — must normalize (NFD, strip marks).* |
+| **PS-4** | Typo (one edit). | Still matches (same fuzzy path as filenames). |
+| **PS-5** | No `placeIndex`, or an unknown place. | No match. |
+| **PS-6** | A place-only match. | Carries **no per-tile reason badge** (the screen shows a `📍 Place · N photos` header / breadcrumb instead). |
+
+### Browse aggregation (`PlaceBrowse`, over `PlaceRecord`s)
+
+| ID | Scenario | Expected |
+|----|----------|----------|
+| **PB-1** | `cities` / `countries` — ranked. | Distinct places by photo count desc, then name; `PlaceSort.NAME` sorts A–Z. Blank levels ignored. |
+| **PB-2** | `states(country)` / `citiesIn(country,state)`. | Only that parent's children. |
+| **PB-3** | City-state (blank `state`): `states` empty → `citiesInCountry`. | Cities listed directly under the country (Drilldown must **not** auto-descend a single state — it re-descends on Back and traps the user). |
+| **PB-4** | Browse counts vs. search results. | Counts pruned to the **live** media set, so a place's shown count equals what tapping it returns (stale entries for deleted photos excluded). |
+
+### UI-layer guards (Place browse — not pure, mirror on iOS)
+
+- **PU-1 — Back walks up, never dead-ends.** No auto-descend of single-child levels; each of
+  country/state/city is a real Back stop. A focused `SearchView` consumes Back to clear its own focus,
+  so hand focus to the (focusable) browse header while browsing.
+- **PU-2 — Gate the entry points.** Dim/disable the Home browse chips until ≥1 place is indexed.
+- **PU-3 — Read-only.** Indexing only ever *reads* EXIF; it never writes to a photo.

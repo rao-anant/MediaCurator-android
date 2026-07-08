@@ -128,11 +128,15 @@ class PreferencesManager(context: Context) {
         prefs.edit().putBoolean(KEY_PDF_CONTENT_SEARCH, enabled).apply()
     }
 
-    // Place search (v1.1) — OFF by default; opt-in gates the ACCESS_MEDIA_LOCATION request + indexing.
-    fun isPlaceSearchEnabled(): Boolean = prefs.getBoolean(KEY_PLACE_SEARCH, false)
+    // Place search (v1.1) — ON by default; gates the ACCESS_MEDIA_LOCATION request + indexing.
+    fun isPlaceSearchEnabled(): Boolean = prefs.getBoolean(KEY_PLACE_SEARCH, true)
     fun setPlaceSearchEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_PLACE_SEARCH, enabled).apply()
     }
+
+    // Ask for photo-location access at most once up front (default-on place search).
+    fun wasMediaLocationAsked(): Boolean = prefs.getBoolean(KEY_MEDIA_LOCATION_ASKED, false)
+    fun setMediaLocationAsked() { prefs.edit().putBoolean(KEY_MEDIA_LOCATION_ASKED, true).apply() }
 
     /** When false, photo MD5 hashing and duplicate detection are completely disabled. */
     fun isPhotoDuplicateDetectionEnabled(): Boolean = prefs.getBoolean(KEY_PHOTO_DUPLICATE_DETECTION, true)
@@ -244,6 +248,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_SEEN_REVIEW_KEYS     = "seen_review_keys"
         private const val KEY_PDF_CONTENT_SEARCH        = "pdf_content_search"
         private const val KEY_PLACE_SEARCH              = "place_search"
+        private const val KEY_MEDIA_LOCATION_ASKED      = "media_location_asked"
         private const val KEY_PHOTO_DUPLICATE_DETECTION = "photo_duplicate_detection"
         private const val KEY_SEEN_ONBOARDING           = "seen_onboarding"
         private const val KEY_SEEN_HIDE_COACH           = "seen_hide_coach"

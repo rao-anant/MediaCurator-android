@@ -14,6 +14,7 @@
   Usage:  pwsh scripts/trim_geonames.ps1 [-MaxAlt 4]
 #>
 param(
+  [string]$Tier = "cities1000",   # GeoNames tier: cities15000 / cities5000 / cities1000 / cities500
   [int]$MaxAlt = 4,
   [string]$OutFile
 )
@@ -32,11 +33,13 @@ function Fetch($url, $dest) {
   }
 }
 
-$citiesZip = Join-Path $work 'cities15000.zip'
-$citiesTxt = Join-Path $work 'cities15000.txt'
+$citiesZip = Join-Path $work "$Tier.zip"
+$citiesTxt = Join-Path $work "$Tier.txt"
 $adminTxt  = Join-Path $work 'admin1CodesASCII.txt'
-Fetch 'https://download.geonames.org/export/dump/cities15000.zip' $citiesZip
+$countryTxt = Join-Path $work 'countryInfo.txt'
+Fetch "https://download.geonames.org/export/dump/$Tier.zip" $citiesZip
 Fetch 'https://download.geonames.org/export/dump/admin1CodesASCII.txt' $adminTxt
+Fetch 'https://download.geonames.org/export/dump/countryInfo.txt' $countryTxt
 if (-not (Test-Path $citiesTxt)) { Expand-Archive -Path $citiesZip -DestinationPath $work -Force }
 
 # admin1 map: "CC.code" -> ascii region name (e.g. "IN.19" -> "Karnataka")
@@ -45,6 +48,20 @@ foreach ($line in [System.IO.File]::ReadLines($adminTxt, [System.Text.Encoding]:
   $f = $line.Split("`t")
   if ($f.Length -ge 3) { $admin[$f[0]] = $f[2] }
 }
+
+# country map: CC -> country name (e.g. "IN" -> "India"). countryInfo.txt: col0=ISO, col4=Country.
+$countries = @{}
+foreach ($line in [System.IO.File]::ReadLines($countryTxt, [System.Text.Encoding]::UTF8)) {
+  if ($line.StartsWith('#')) { continue }
+  $f = $line.Split("`t")
+  if ($f.Length -ge 5 -and $f[0]) { $countries[$f[0]] = $f[4] }
+}
+
+# Also emit country-name -> ISO code (for flag emoji in the browse UI): assets/country_codes.tsv
+$ccOut = Join-Path $root 'app\src\main\assets\country_codes.tsv'
+$cw = New-Object System.IO.StreamWriter($ccOut, $false, (New-Object System.Text.UTF8Encoding($false)))
+foreach ($kv in $countries.GetEnumerator()) { $cw.WriteLine("$($kv.Value)`t$($kv.Key)") }
+$cw.Close()
 
 # GeoNames cities15000 columns (tab-separated): 1=name 2=ascii 3=altnames 4=lat 5=lon 8=country 10=admin1
 $reader = New-Object System.IO.StreamReader($citiesTxt, [System.Text.Encoding]::UTF8)
@@ -71,12 +88,14 @@ try {
     $admin1 = ''
     $ak = "$cc.$a1code"
     if ($admin.ContainsKey($ak)) { $admin1 = $admin[$ak] }
+    $countryName = if ($countries.ContainsKey($cc)) { $countries[$cc] } else { $cc }
 
-    # Guard the field separators out of any value.
-    $nm  = ($name    -replace '\|',' ')
+    # Guard the field separators out of any value. Field 5 is the country NAME (searchable/browseable).
+    $nm  = ($name        -replace '\|',' ')
     $al  = (($alts.ToArray() -join ',') -replace '\|',' ')
-    $ad  = ($admin1  -replace '[\|,]',' ')
-    $writer.WriteLine("$nm|$al|$lat|$lon|$cc|$ad")
+    $cn  = ($countryName -replace '[\|,]',' ')
+    $ad  = ($admin1      -replace '[\|,]',' ')
+    $writer.WriteLine("$nm|$al|$lat|$lon|$cn|$ad")
     $n++
   }
 } finally { $reader.Close(); $writer.Close() }

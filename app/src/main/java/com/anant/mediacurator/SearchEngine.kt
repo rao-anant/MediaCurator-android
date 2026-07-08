@@ -153,10 +153,8 @@ object SearchEngine {
             }
 
             val pdfContentMatch = pdfBm25Total > 0f
-            val reason = buildReason(
-                matchedFileparts, item.displayName, pdfContentMatch,
-                if (placeMatched) placeNames.firstOrNull() else null
-            )
+            // No per-tile place badge — the Search screen shows a "📍 Place · N photos" header instead.
+            val reason = buildReason(matchedFileparts, item.displayName, pdfContentMatch)
             results.add(Result(item, reason, avgScore))
         }
 
@@ -165,9 +163,18 @@ object SearchEngine {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /** Split query on whitespace; lowercase; drop blanks and single-character noise. */
+    /**
+     * Lowercase + strip diacritics/combining marks so accented and non-Latin-cased names match
+     * (e.g. Turkish "İmrahor" → "imrahor", "München" → "munchen"). Without this, lowercasing "İ"
+     * inserts a combining dot that the tokenizers split on, and the place never matches.
+     */
+    private fun norm(s: String): String =
+        java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+
+    /** Split query on whitespace; normalize; drop blanks and single-character noise. */
     private fun tokenise(query: String): List<String> =
-        query.trim().lowercase().split(Regex("\\s+")).filter { it.length >= 2 }
+        norm(query.trim()).split(Regex("\\s+")).filter { it.length >= 2 }
 
     /**
      * Generic auto-generated filename tokens that carry no search meaning and would
@@ -186,7 +193,7 @@ object SearchEngine {
      * "IMG_20230415_beach_trip.jpg" → ["20230415", "beach", "trip"]  ("img" dropped)
      */
     private fun filenameTokens(displayName: String): List<String> {
-        val base = displayName.substringBeforeLast('.').lowercase()
+        val base = norm(displayName.substringBeforeLast('.'))
         return base.split(Regex("[^a-z0-9]+"))
             .filter { it.length >= 2 && it !in FILENAME_STOPWORDS }
     }
@@ -264,23 +271,20 @@ object SearchEngine {
     private fun buildReason(
         fileParts: List<String>,
         fullFilename: String,
-        pdfContentMatch: Boolean = false,
-        place: String? = null
+        pdfContentMatch: Boolean = false
     ): String {
         return when {
             fileParts.isNotEmpty() ->
                 "≈ ${fullFilename.substringBeforeLast('.').take(20)}"
             pdfContentMatch ->
                 "📄 content (first 5 pg)"
-            place != null ->
-                "📍 $place"
             else -> ""
         }
     }
 
-    /** Lowercased word tokens from a place's names (city + aliases + region), for fuzzy matching. */
+    /** Normalized word tokens from a place's names (city + aliases + region), for fuzzy matching. */
     private fun placeWordTokens(names: List<String>): List<String> =
-        names.flatMap { it.lowercase().split(Regex("[^\\p{L}\\p{Nd}]+")) }
+        names.flatMap { norm(it).split(Regex("[^\\p{L}\\p{Nd}]+")) }
              .filter { it.length >= 2 }
              .distinct()
 }

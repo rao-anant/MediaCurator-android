@@ -34,15 +34,16 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
     private val _results = MutableLiveData<List<GalleryItem.Media>?>(null)
     val results: LiveData<List<GalleryItem.Media>?> = _results
 
-    // The browseable "places in your library" list (city → count), for the empty-state chips.
-    private val _places = MutableLiveData<List<PlaceCount>>(emptyList())
-    val places: LiveData<List<PlaceCount>> = _places
+    // Per-photo place records for the browse experiments; the Activity aggregates via PlaceBrowse.
+    private val _placeRecords = MutableLiveData<List<PlaceRecord>>(emptyList())
+    val placeRecords: LiveData<List<PlaceRecord>> = _placeRecords
 
     fun loadPlaces() {
-        if (!prefs.isPlaceSearchEnabled()) { _places.postValue(emptyList()); return }
+        if (!prefs.isPlaceSearchEnabled()) { _placeRecords.postValue(emptyList()); return }
         viewModelScope.launch(Dispatchers.IO) {
+            val liveIds = MediaCache.get(repo).mapTo(HashSet()) { it.id }   // only count photos that still exist
             val store = PlaceStore.getInstance(getApplication<android.app.Application>()).also { it.ensureLoaded() }
-            _places.postValue(store.placeSummary())
+            _placeRecords.postValue(store.records(liveIds))
         }
     }
 

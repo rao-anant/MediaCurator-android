@@ -48,6 +48,11 @@ class HomeActivity : AppCompatActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { viewModel.load(); afterMediaAccessSought() }
 
+    // Place search is on by default → ask for photo-location access once (indexing checks it later).
+    private val mediaLocationLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
     private val allFilesLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -80,6 +85,16 @@ class HomeActivity : AppCompatActivity() {
         bindCard(binding.cardSearch, R.drawable.ic_home_search, "Search", "Name, content, PDF text") {
             startActivity(Intent(this, SearchActivity::class.java))
         }
+
+        // Place browse entry points (A = flat chips, B = drill-down).
+        binding.chipSearchA.setOnClickListener {
+            startActivity(Intent(this, SearchActivity::class.java)
+                .putExtra(SearchActivity.EXTRA_PLACE_BROWSE_MODE, "A"))
+        }
+        binding.chipSearchB.setOnClickListener {
+            startActivity(Intent(this, SearchActivity::class.java)
+                .putExtra(SearchActivity.EXTRA_PLACE_BROWSE_MODE, "B"))
+        }
         bindCard(binding.cardHidden, R.drawable.ic_home_hidden, "Hidden months", "…") {
             startActivity(Intent(this, HiddenActivity::class.java))
         }
@@ -103,6 +118,30 @@ class HomeActivity : AppCompatActivity() {
         } else {
             permissionLauncher.launch(requiredPermissions())
         }
+        updatePlaceChips()
+    }
+
+    /**
+     * Gate the place-browse chips: until at least one place has been indexed, browsing them just
+     * shows an empty screen — so dim + disable them and explain, rather than confuse. Enables once
+     * places exist (indexing runs as the user browses the gallery).
+     */
+    private fun updatePlaceChips() {
+        val chips = listOf(binding.chipSearchA, binding.chipSearchB)
+        if (!prefs.isPlaceSearchEnabled()) {
+            chips.forEach { it.isEnabled = false; it.alpha = 0.5f }
+            binding.tvPlaceLabel.text = "Place search is off — turn it on in Settings"
+            return
+        }
+        Thread {
+            val n = PlaceStore.getInstance(this).let { it.ensureLoaded(); it.locatedCount() }
+            runOnUiThread {
+                val ready = n > 0
+                chips.forEach { it.isEnabled = ready; it.alpha = if (ready) 1f else 0.5f }
+                binding.tvPlaceLabel.text =
+                    if (ready) "Search by place" else "Places appear here as you browse your gallery"
+            }
+        }.start()
     }
 
     /**
@@ -111,7 +150,17 @@ class HomeActivity : AppCompatActivity() {
      * mandatory demo play (see [maybeShowDemoThenRestore]).
      */
     private fun afterMediaAccessSought() {
+        maybeRequestMediaLocation()
         requestAllFilesAccess()
+    }
+
+    /** Ask for ACCESS_MEDIA_LOCATION once, up front, since place search is on by default. */
+    private fun maybeRequestMediaLocation() {
+        if (!prefs.isPlaceSearchEnabled() || prefs.wasMediaLocationAsked() || !hasMediaPermissions()) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_MEDIA_LOCATION)
+            == PackageManager.PERMISSION_GRANTED) return
+        prefs.setMediaLocationAsked()
+        mediaLocationLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
     }
 
     /**

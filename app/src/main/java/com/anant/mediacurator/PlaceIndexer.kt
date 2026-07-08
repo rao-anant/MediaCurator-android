@@ -55,9 +55,8 @@ object PlaceIndexer {
         for (item in todo) {
             if (!shouldContinue()) break
             val ll = readLatLon(context, item)
-            val names = if (ll != null) geo.nearest(ll[0], ll[1])?.searchNames ?: emptyList()
-                        else emptyList()
-            store.save(item.id, item.size, names)
+            val city = if (ll != null) geo.nearest(ll[0], ll[1]) else null
+            store.save(item.id, item.size, city)   // null city → stored empty (scanned, no GPS)
             done++
             if (done % 200 == 0) { store.flush(); onProgress(done, todo.size) }
         }

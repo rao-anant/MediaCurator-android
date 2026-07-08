@@ -42,9 +42,10 @@ class SearchEnginePlaceTest {
         assertEquals(setOf(3L), ids("york"))
     }
 
-    @Test fun reasonShowsCityPin() {
+    @Test fun placeMatchHasNoPerTileReason() {
+        // The per-tile pin is gone (a header shows the place instead); place-only matches carry no badge.
         val r = SearchEngine.search("bangalore", media, placeIndex = places).first { it.item.id == 1L }
-        assertEquals("📍 Bengaluru", r.matchReason)   // pin + primary (city) name, not the alias
+        assertEquals("", r.matchReason)
     }
 
     @Test fun typoTolerant() {
@@ -58,5 +59,19 @@ class SearchEnginePlaceTest {
 
     @Test fun unknownPlace_noResults() {
         assertTrue(ids("london").isEmpty())
+    }
+
+    @Test fun matchesTurkishDottedI() {
+        // "İmrahor" lowercases to "i"+combining-dot, which used to break tokenization → no match.
+        val photo = img(9, "x.jpg")
+        val places = mapOf(9L to listOf("İmrahor", "İstanbul", "Turkey"))
+        assertTrue(9L in SearchEngine.search("imrahor", listOf(photo), placeIndex = places).map { it.item.id })
+        assertTrue(9L in SearchEngine.search("İmrahor", listOf(photo), placeIndex = places).map { it.item.id })
+    }
+
+    @Test fun matchesAccentedCity() {
+        val photo = img(10, "x.jpg")
+        val places = mapOf(10L to listOf("München", "Bavaria", "Germany"))
+        assertTrue(10L in SearchEngine.search("munchen", listOf(photo), placeIndex = places).map { it.item.id })
     }
 }

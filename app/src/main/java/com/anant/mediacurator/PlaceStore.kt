@@ -4,14 +4,14 @@ import android.content.Context
 import android.util.Log
 import java.io.File
 
-/** A distinct place the user has photos in, with how many photos. */
-data class PlaceCount(val name: String, val count: Int)
+/** A photo's place split into browseable levels; blank fields where unknown. */
+data class PlaceRecord(val city: String, val state: String, val country: String)
 
 /**
  * Persistent cache of each photo's reverse-geocoded place (v1.1 Place search). Mirrors
- * [PhotoHashStore]: an in-memory map backed by a tab-separated file in filesDir, touched off the
- * main thread. Value is the comma-joined place names (city + aliases + region). An **empty** value
- * means "scanned, but has no GPS" — recorded so we never re-read that photo's EXIF on a later pass.
+ * [PhotoHashStore]. File line: `id \t size \t value`, where value is `city|state|country|alias1,alias2`
+ * (or **empty** = scanned but no GPS — so it isn't re-read). city/state/country drive browse; those
+ * plus aliases drive search. Touched off the main thread.
  */
 class PlaceStore private constructor(context: Context) {
 
@@ -21,25 +21,12 @@ class PlaceStore private constructor(context: Context) {
             instance ?: synchronized(this) {
                 instance ?: PlaceStore(context.applicationContext).also { instance = it }
             }
-
-        /**
-         * Rank the distinct places (primary city = first CSV token) by photo count, then name.
-         * Pure — the browseable "places in your library" list. Empty/no-GPS entries are ignored.
-         */
-        fun summarize(placeCsvValues: Collection<String>): List<PlaceCount> =
-            placeCsvValues.asSequence()
-                .filter { it.isNotEmpty() }
-                .map { it.substringBefore(',').trim() }
-                .filter { it.isNotEmpty() }
-                .groupingBy { it }
-                .eachCount()
-                .map { PlaceCount(it.key, it.value) }
-                .sortedWith(compareByDescending<PlaceCount> { it.count }.thenBy { it.name })
     }
 
-    private val cacheFile = File(context.filesDir, "place_cache.txt")
-    // id -> (size, csvNames).  csv "" = scanned, no location.
-    private val cache = HashMap<Long, Pair<Long, String>>()
+    // v2 = structured "city|state|country|aliases" (v1 stored a flat name CSV); new name forces a
+    // clean re-index rather than mis-parsing old rows.
+    private val cacheFile = File(context.filesDir, "place_cache_v2.txt")
+    private val cache = HashMap<Long, Pair<Long, String>>()   // id -> (size, value)
     private var loaded = false
 
     @Synchronized
@@ -58,14 +45,11 @@ class PlaceStore private constructor(context: Context) {
         } catch (e: Exception) { Log.e("PlaceStore", "load failed", e) }
     }
 
-    /** True if this photo (matched by id + size) has already been scanned. */
     @Synchronized
     fun hasEntry(id: Long, size: Long): Boolean = cache[id]?.first == size
 
     @Synchronized
-    fun save(id: Long, size: Long, names: List<String>) {
-        cache[id] = size to names.joinToString(",") { it.replace(',', ' ').replace('\t', ' ').trim() }
-    }
+    fun save(id: Long, size: Long, city: GeoCity?) { cache[id] = size to encode(city) }
 
     @Synchronized
     fun deleteEntry(id: Long) { cache.remove(id) }
@@ -74,16 +58,25 @@ class PlaceStore private constructor(context: Context) {
     @Synchronized
     fun locatedCount(): Int = cache.count { it.value.second.isNotEmpty() }
 
-    /** The browseable, ranked list of places in the user's library (city → photo count). */
-    @Synchronized
-    fun placeSummary(): List<PlaceCount> = summarize(cache.values.map { it.second })
-
-    /** media id → place tokens (city + aliases + region); only entries that have a location. */
+    /** media id → search tokens (city, aliases, state, country); only located photos. */
     @Synchronized
     fun toSearchIndex(): Map<Long, List<String>> =
         cache.asSequence()
             .filter { it.value.second.isNotEmpty() }
-            .associate { it.key to it.value.second.split(',').filter { s -> s.isNotBlank() } }
+            .associate { it.key to searchTokens(it.value.second) }
+
+    /**
+     * One [PlaceRecord] per located photo — the raw input for browse aggregation ([PlaceBrowse]).
+     * Pass [validIds] (live media ids) to exclude stale entries for photos that were deleted, so
+     * browse counts match what search can actually return.
+     */
+    @Synchronized
+    fun records(validIds: Set<Long>? = null): List<PlaceRecord> =
+        cache.asSequence()
+            .filter { validIds == null || it.key in validIds }
+            .map { it.value.second }.filter { it.isNotEmpty() }
+            .mapNotNull { decode(it) }
+            .toList()
 
     @Synchronized
     fun flush() {
@@ -94,10 +87,32 @@ class PlaceStore private constructor(context: Context) {
         } catch (e: Exception) { Log.e("PlaceStore", "flush failed", e) }
     }
 
-    /** Wipe (e.g. when the user turns Place search off). */
     @Synchronized
     fun clear() {
         cache.clear()
         try { if (cacheFile.exists()) cacheFile.delete() } catch (_: Exception) {}
+    }
+
+    // ── value codec: "city|state|country|alias1,alias2" ──────────────────────────
+    private fun encode(city: GeoCity?): String {
+        if (city == null) return ""
+        fun clean(v: String) = v.replace('|', ' ').replace('\t', ' ').trim()
+        val aliases = city.altNames.joinToString(",") { clean(it.replace(',', ' ')) }
+        return "${clean(city.name)}|${clean(city.admin1)}|${clean(city.country)}|$aliases"
+    }
+
+    private fun decode(value: String): PlaceRecord? {
+        val p = value.split('|')
+        if (p.isEmpty() || p[0].isBlank()) return null
+        return PlaceRecord(p[0], p.getOrElse(1) { "" }, p.getOrElse(2) { "" })
+    }
+
+    private fun searchTokens(value: String): List<String> {
+        val p = value.split('|')
+        val city    = p.getOrElse(0) { "" }
+        val state   = p.getOrElse(1) { "" }
+        val country = p.getOrElse(2) { "" }
+        val aliases = p.getOrElse(3) { "" }.split(',').filter { it.isNotBlank() }
+        return (listOf(city) + aliases + listOf(state, country)).filter { it.isNotBlank() }.distinct()
     }
 }
