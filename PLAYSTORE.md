@@ -109,7 +109,8 @@ hiding keeps reviewed items out of your way, so curation stays fast and even fun
 • Search by filename, with fuzzy matching that forgives typos ("flwoer" still finds "flower")
 • Search inside your PDFs — find a document by a word on one of its pages
 • Search by place — find photos by the city, region, or country where you took them, or browse
-  them by location. Works fully offline; your locations never leave your phone
+  them by location. Share, rename, move, or delete right from the results, or open a photo in your
+  phone's gallery. Works fully offline; your locations never leave your phone
 
 📄 PDF SUPPORT
 • Browse, view, and delete PDFs alongside your media
@@ -139,6 +140,8 @@ third party.
 ## What's new (release notes) — v1.1
 ```
 • Search and browse your photos by place — the city, region, and country where you took them.
+• Act on results right there: share, rename, move, or delete, or open a photo in your phone's gallery.
+• Faster place browsing, and your place index is kept across reinstalls — no waiting to re-scan.
 • Fully offline, like everything else — nothing leaves your device.
 ```
 

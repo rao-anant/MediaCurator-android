@@ -46,6 +46,14 @@
             android:src="@drawable/ic_rename"
             android:contentDescription="Rename" />
 
+        <ImageButton
+            android:id="@+id/btnSwitchAlbum"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_swap"
+            android:contentDescription="Switch album" />
+
         <Space
             android:layout_width="0dp"
             android:layout_height="wrap_content"

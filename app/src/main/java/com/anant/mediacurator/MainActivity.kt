@@ -451,6 +451,58 @@ class MainActivity : AppCompatActivity() {
             exitSelectionMode()
             viewModel.deleteMedia(selected)
         }
+        // Single-select extras.
+        binding.btnRenameSelected.setOnClickListener {
+            adapter.getSelectedItems().singleOrNull()?.let { showRenameDialog(it) }
+        }
+        binding.btnGallerySelected.setOnClickListener {
+            adapter.getSelectedItems().singleOrNull()?.let { openInGallery(it) }
+        }
+    }
+
+    /** Rename dialog (base name only; extension preserved), then rename via the view-model. */
+    private fun showRenameDialog(item: MediaItem) {
+        val fullName = item.displayName
+        val dotIdx = fullName.lastIndexOf('.')
+        val baseName = if (dotIdx > 0) fullName.substring(0, dotIdx) else fullName
+        val ext = if (dotIdx > 0) fullName.substring(dotIdx) else ""
+        val input = android.widget.EditText(this).apply {
+            setText(baseName); setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        }
+        val pad = (24 * resources.displayMetrics.density).toInt()
+        val wrapper = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, 0, pad, 0); addView(input)
+        }
+        val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle("Rename")
+            .setView(wrapper)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Rename") { _, _ ->
+                val newBase = input.text.toString().trim()
+                if (newBase.isNotEmpty()) { exitSelectionMode(); viewModel.initiateRename(item, newBase + ext) }
+            }
+            .create()
+        dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        dialog.show()
+        input.post { input.requestFocus(); input.selectAll() }
+    }
+
+    /** Hand the photo to the phone's own gallery app (favorite/edit there). */
+    private fun openInGallery(item: MediaItem) {
+        val mime = when (item.type) {
+            MediaType.IMAGE -> "image/*"
+            MediaType.VIDEO -> "video/*"
+            MediaType.AUDIO -> "audio/*"
+            MediaType.PDF   -> "application/pdf"
+        }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(Uri.parse(item.uri), mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            })
+        } catch (e: Exception) { showToast("No gallery app found") }
     }
 
     private fun exitSelectionMode() {
@@ -512,6 +564,10 @@ class MainActivity : AppCompatActivity() {
             val totalBytes = adapter.getSelectedItems().sumOf { it.size }
             binding.tvSelectionCount.text = "$count selected · ${GalleryAdapter.fmtBytes(totalBytes)}"
             binding.btnDeleteSelected.isEnabled = true
+            // Rename + Show-in-gallery act on one photo; hide them for multi-selection.
+            val single = count == 1
+            binding.btnRenameSelected.isVisible = single
+            binding.btnGallerySelected.isVisible = single
         } else {
             binding.selectionBar.isVisible = false
         }

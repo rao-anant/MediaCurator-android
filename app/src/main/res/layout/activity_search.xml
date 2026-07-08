@@ -137,5 +137,85 @@
             android:textColor="@color/on_surface_variant"
             android:textSize="15sp"
             android:text="Search file names\nand text inside PDFs" />
+
+        <!-- Multi-select action bar — appears when results are long-pressed to act on photos. -->
+        <LinearLayout
+            android:id="@+id/selectionBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:orientation="vertical"
+            android:background="@color/selection_bar"
+            android:padding="12dp"
+            android:elevation="8dp"
+            android:visibility="gone">
+            <TextView
+                android:id="@+id/tvSelectionCount"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/on_surface"
+                android:text="0 selected" />
+            <!-- Icon actions, matching the gallery/viewer glyphs. Share + Delete always show;
+                 Rename / Switch Album / To gallery appear only on a single selection. Delete is
+                 pushed to the right and red-tinted to set the destructive action apart. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnShareSelected"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:icon="@drawable/ic_share"
+                    app:iconTint="@color/on_surface"
+                    android:contentDescription="Share"
+                    android:tooltipText="Share" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnRenameSelected"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:icon="@drawable/ic_rename"
+                    app:iconTint="@color/on_surface"
+                    android:contentDescription="Rename"
+                    android:tooltipText="Rename" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnMoveSelected"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:icon="@drawable/ic_swap"
+                    app:iconTint="@color/on_surface"
+                    android:contentDescription="Switch album"
+                    android:tooltipText="Switch album" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnGallerySelected"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:icon="@drawable/ic_open_gallery"
+                    app:iconTint="@color/on_surface"
+                    android:contentDescription="Show in gallery"
+                    android:tooltipText="Show in gallery" />
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnDeleteSelected"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:icon="@drawable/ic_delete"
+                    app:iconTint="@color/delete_red"
+                    android:contentDescription="Delete"
+                    android:tooltipText="Delete" />
+            </LinearLayout>
+        </LinearLayout>
     </FrameLayout>
 </LinearLayout>

@@ -168,7 +168,7 @@ object SearchEngine {
      * (e.g. Turkish "İmrahor" → "imrahor", "München" → "munchen"). Without this, lowercasing "İ"
      * inserts a combining dot that the tokenizers split on, and the place never matches.
      */
-    private fun norm(s: String): String =
+    fun norm(s: String): String =
         java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
             .replace(Regex("\\p{M}+"), "")
 

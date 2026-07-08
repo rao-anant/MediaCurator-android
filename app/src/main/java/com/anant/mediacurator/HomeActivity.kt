@@ -134,12 +134,19 @@ class HomeActivity : AppCompatActivity() {
             return
         }
         Thread {
-            val n = PlaceStore.getInstance(this).let { it.ensureLoaded(); it.locatedCount() }
+            val store = PlaceStore.getInstance(this).also { it.ensureLoaded() }
+            // Reinstall: filesDir was wiped, but a Downloads mirror may exist. Seed from it here so
+            // the chips light up immediately — without waiting for the user to visit the gallery
+            // (which is where the background re-index otherwise runs).
+            if (store.isEmpty() && hasMediaPermissions()) {
+                store.restoreFromDownloads(MediaCache.get(MediaRepository(this)))
+            }
+            val n = store.locatedCount()
             runOnUiThread {
                 val ready = n > 0
                 chips.forEach { it.isEnabled = ready; it.alpha = if (ready) 1f else 0.5f }
                 binding.tvPlaceLabel.text =
-                    if (ready) "Search by place" else "Places appear here as you browse your gallery"
+                    if (ready) "Browse by Location" else "Places appear here as you browse your gallery"
             }
         }.start()
     }

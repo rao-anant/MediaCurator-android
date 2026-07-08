@@ -237,6 +237,25 @@ must be mirrored on iOS.
 
 - **PU-1 — Back walks up, never dead-ends.** No auto-descend of single-child levels; each of
   country/state/city is a real Back stop. A focused `SearchView` consumes Back to clear its own focus,
-  so hand focus to the (focusable) browse header while browsing.
+  so hand focus to the (focusable) browse header while browsing. Back also exits selection mode first.
 - **PU-2 — Gate the entry points.** Dim/disable the Home browse chips until ≥1 place is indexed.
 - **PU-3 — Read-only.** Indexing only ever *reads* EXIF; it never writes to a photo.
+- **PU-4 — Selection actions.** Long-press a result → icon bar. **Share / Switch Album / Delete** show
+  for any count; **Rename** + **Show in gallery** appear only when **exactly one** is selected (and
+  hide again at ≥2). After delete/rename/move the results + browse counts refresh. **Show in gallery**
+  hands off to the phone's gallery app (`ACTION_VIEW`), not the in-app timeline; **Delete** is a red
+  glyph (`delete_red`).
+- **PU-5 — Browsing doesn't curate.** Viewing/opening a photo via place browse must **not** mark its
+  month reviewed (curation % is driven only by the timeline's `seenReviewKeys`).
+- **PU-6 — Exact-place fast path.** A chip/breadcrumb/exact-name query resolves via the `placeExact`
+  name→photos map (no full-library fuzzy scan); results equal the fuzzy engine's exact-match set.
+- **PU-7 — Reinstall survival + Home gating.** After a reinstall (or app-data clear), the index
+  restores from the Downloads mirror remapped by displayName+size — already-known photos are **not**
+  re-EXIF-scanned; only new/renamed files are. The mirror is refreshed after any pass that indexes new
+  photos. The **Home place chips enable from the restored index without a gallery visit** (Home seeds
+  from the mirror when the local cache is empty).
+- **PU-8 — Consistent action set (all screens).** The same five icon actions (Share · Rename · Switch
+  Album · Show in gallery · Delete-in-red) appear in the **gallery**, **Hidden**, and **place-browse**
+  selection bars *and* the single-photo **Viewer** toolbar, with the same single-vs-multi visibility
+  rule. A single photo exposes the identical actions whether opened by short press (Viewer) or long
+  press (selection bar).

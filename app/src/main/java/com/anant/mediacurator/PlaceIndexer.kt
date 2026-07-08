@@ -47,6 +47,10 @@ object PlaceIndexer {
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }
     ) {
         store.ensureLoaded()
+        // Reinstall: filesDir was wiped, so seed from the Downloads mirror (remapped to current
+        // ids by displayName+size) before scanning — this skips re-reading EXIF for known photos.
+        if (store.isEmpty()) store.restoreFromDownloads(images)
+
         val todo = images.filter { it.type == MediaType.IMAGE && !store.hasEntry(it.id, it.size) }
         if (todo.isEmpty()) { onProgress(0, 0); return }
 
@@ -61,6 +65,8 @@ object PlaceIndexer {
             if (done % 200 == 0) { store.flush(); onProgress(done, todo.size) }
         }
         store.flush()
+        // Refresh the reinstall-survival mirror now that new photos are indexed.
+        if (done > 0) store.backupToDownloads(images)
         onProgress(done, todo.size)
     }
 }

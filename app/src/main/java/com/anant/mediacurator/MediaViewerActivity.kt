@@ -64,6 +64,26 @@ class MediaViewerActivity : AppCompatActivity() {
             viewModel.onRenamePermissionResult(result.resultCode == Activity.RESULT_OK)
         }
 
+    // Pending album-move state (mirrors the gallery / Hidden move flow).
+    private var pendingMoveItem: MediaItem? = null
+    private var pendingMovePath: String? = null
+    private var pendingMoveTargetName: String? = null
+
+    private val moveLauncher =
+        registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                val item = pendingMoveItem ?: return@registerForActivityResult
+                val path = pendingMovePath ?: return@registerForActivityResult
+                val targetName = pendingMoveTargetName ?: return@registerForActivityResult
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) { moveItemDirect(item, path) }
+                    Toast.makeText(this@MediaViewerActivity, "Switched to $targetName", Toast.LENGTH_SHORT).show()
+                    clearPendingMove()
+                    MediaCache.invalidate()   // folder changed — Home/gallery recompute later
+                }
+            }
+        }
+
     companion object {
         const val EXTRA_START_POSITION = "extra_start_position"
         const val EXTRA_START_ID = "extra_start_id"
@@ -83,8 +103,10 @@ class MediaViewerActivity : AppCompatActivity() {
         // Material3 auto-applies colorControlNormal as imageTintList on ImageButtons.
         // Null it out so our vector's hardcoded white fill renders directly.
         binding.btnShare.imageTintList = null
-        binding.btnDelete.imageTintList = null
         binding.btnRename.imageTintList = null
+        binding.btnSwitchAlbum.imageTintList = null
+        // Delete glyph is red (matches the selection bars), overriding the theme's control tint.
+        binding.btnDelete.imageTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.delete_red))
 
         // Push the bottom toolbar above the system navigation bar
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
@@ -235,6 +257,12 @@ class MediaViewerActivity : AppCompatActivity() {
             }
         }
 
+        binding.btnSwitchAlbum.setOnClickListener {
+            if (::adapter.isInitialized && binding.viewPager.currentItem < adapter.itemCount) {
+                showAlbumPicker(adapter.getItem(binding.viewPager.currentItem))
+            }
+        }
+
         binding.videoScrubber.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
@@ -356,6 +384,86 @@ class MediaViewerActivity : AppCompatActivity() {
             input.requestFocus()
             input.selectAll()
         }
+    }
+
+    // ── Switch Album (move) — mirrors the gallery / Hidden move flow ─────────────────
+
+    private fun showAlbumPicker(item: MediaItem) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+            Toast.makeText(this, "Move requires Android 10+", Toast.LENGTH_SHORT).show(); return
+        }
+        lifecycleScope.launch {
+            val albums = fetchAlbums()
+            if (albums.isEmpty()) { Toast.makeText(this@MediaViewerActivity, "No albums found", Toast.LENGTH_SHORT).show(); return@launch }
+            val names = albums.keys.toTypedArray()
+            MaterialAlertDialogBuilder(this@MediaViewerActivity)
+                .setTitle("Switch Album")
+                .setItems(names) { _, which ->
+                    val targetName = names[which]
+                    val targetPath = albums[targetName] ?: return@setItems
+                    moveToAlbum(item, targetName, targetPath)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+    }
+
+    private suspend fun fetchAlbums(): LinkedHashMap<String, String> = withContext(Dispatchers.IO) {
+        val result = LinkedHashMap<String, String>()
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return@withContext result
+        val projection = arrayOf(
+            android.provider.MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+            android.provider.MediaStore.MediaColumns.RELATIVE_PATH
+        )
+        contentResolver.query(
+            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            projection, null, null,
+            "${android.provider.MediaStore.Images.Media.BUCKET_DISPLAY_NAME} ASC"
+        )?.use { cursor ->
+            val bucketCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+            val pathCol   = cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns.RELATIVE_PATH)
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(bucketCol) ?: continue
+                val path = cursor.getString(pathCol)   ?: continue
+                if (!result.containsKey(name)) result[name] = path
+            }
+        }
+        result
+    }
+
+    private fun moveToAlbum(item: MediaItem, targetName: String, targetPath: String) {
+        if (item.relativePath.trimEnd('/').lowercase() == targetPath.trimEnd('/').lowercase()) {
+            Toast.makeText(this, "Already in $targetName", Toast.LENGTH_SHORT).show(); return
+        }
+        pendingMoveItem = item
+        pendingMovePath = targetPath
+        pendingMoveTargetName = targetName
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            try {
+                val pi = android.provider.MediaStore.createWriteRequest(contentResolver, listOf(Uri.parse(item.uri)))
+                moveLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+            } catch (e: Exception) {
+                Toast.makeText(this, "Move failed: ${e.message}", Toast.LENGTH_SHORT).show(); clearPendingMove()
+            }
+        } else {
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) { moveItemDirect(item, targetPath) }
+                Toast.makeText(this@MediaViewerActivity, "Switched to $targetName", Toast.LENGTH_SHORT).show()
+                clearPendingMove(); MediaCache.invalidate()
+            }
+        }
+    }
+
+    private fun moveItemDirect(item: MediaItem, targetPath: String) {
+        try {
+            contentResolver.update(Uri.parse(item.uri), android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, targetPath)
+            }, null, null)
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    private fun clearPendingMove() {
+        pendingMoveItem = null; pendingMovePath = null; pendingMoveTargetName = null
     }
 
     private fun shareMedia(item: MediaItem) {

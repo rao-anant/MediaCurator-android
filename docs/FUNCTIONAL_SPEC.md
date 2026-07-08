@@ -293,17 +293,25 @@ level. Hidden in Largest-overall flat mode.
 
 ### Selection mode & actions
 - **Long-press** any item enters selection mode and selects it; tap more to add/remove.
-- A **selection bar** appears at the bottom showing *"N selected · {size}"* with three buttons:
-  - **Share** — opens the system share sheet (single → ACTION_SEND, multiple → SEND_MULTIPLE);
-    MIME narrowed when all one type, else `*/*`. Selection is **kept** after sharing.
-  - **Move** (album switch) — Android 10+ only (else toast *"Move requires Android 10+"*).
-    Opens **"Switch Album"** list dialog of album names. Moving items already in the target is
-    skipped; toast summarizes *"Switched M items to {album}"* or *"Switched M · K already in
-    {album}"*. On 11+ a system write-consent dialog is shown first.
+- A **selection bar** appears at the bottom showing *"N selected · {size}"* with a row of **icon**
+  actions (same glyph set as the Viewer, so a photo's actions look identical whether reached by a
+  short press → Viewer or a long press → selection bar). This same icon bar is used across the
+  **gallery, Hidden, and place-browse** screens:
+  - **Share** — system share sheet (single → ACTION_SEND, multiple → SEND_MULTIPLE); MIME narrowed
+    when all one type, else `*/*`. Selection is **kept** after sharing.
+  - **Switch Album** (move) — Android 10+ only (else toast *"Move requires Android 10+"*). Opens the
+    **"Switch Album"** list dialog; items already in the target are skipped. On 11+ a system
+    write-consent dialog is shown first.
   - **Delete** — soft-deletes the selection (→ Trash). Exits selection mode immediately. **No
-    confirmation dialog, no per-delete snackbar** (silent; undo via ↶ / Trash).
+    confirmation dialog, no per-delete snackbar** (silent; undo via ↶ / Trash). Rendered as a **red
+    glyph** (`delete_red`) to set the destructive action apart.
+  - Share / Switch Album / Delete show for **any** count; **Rename** (name dialog, extension kept)
+    and **Show in gallery** (hands the photo to the phone's own gallery app via `ACTION_VIEW`) show
+    only when **exactly one** item is selected.
 - **Back** while selecting exits selection mode (doesn't leave the screen).
 - Empty-selection taps on any action show toast *"No items selected"*.
+- ▶ **Consistency:** the same five actions appear in the single-photo **Viewer** toolbar (§4), so
+  "these icons and actions" are available for a single photo no matter how it was opened.
 
 ### Tapping an item (not selecting)
 - **PDF** → opens an external PDF viewer via chooser ("Open PDF with"); toast *"No PDF viewer
@@ -453,7 +461,7 @@ PDFs/Files-app docs + any available metadata.
 
 ### v1.1: Place search — offline reverse-geocoding
 
-**Built (v1.1, versionCode 23; on the `place-search` branch, not yet merged/shipped).** Search **and**
+**Built (v1.1, versionCode 25; on the `place-search` branch, not yet merged/shipped).** Search **and**
 browse photos by the **place** they were taken, **fully offline** so the "no internet, ever / nothing
 leaves your device" promise holds. **On by default** (a Settings toggle turns it off and clears the
 local place cache).
@@ -478,6 +486,22 @@ local place cache).
     under the country. Phone **Back walks up one level**; the ‹ toolbar arrow jumps to Home.
   - A **sort toggle** (most-photos ⇄ A–Z) applies to both. Counts are pruned to the live library so a
     place's count matches what a tap returns. (A tree-view "Option C" was prototyped and dropped.)
+- **Act on browsed/searched photos.** Long-press a result to multi-select (shared `GalleryAdapter`
+  selection), shown as **icon** actions matching the viewer's glyphs: **Share** and **Delete**
+  (→ recoverable Trash, feeds Home's quick-undo; delete is filled `delete_red`). With exactly **one**
+  selected, also **Rename** (dialog-free with All-files access), **Switch Album** (MediaStore
+  `createWriteRequest` on 11+), and **Show in gallery** — which hands the photo to the **phone's own
+  gallery app** via `ACTION_VIEW` (same as the in-app viewer's open-in-gallery), so the user can
+  favorite/edit it there. Browsing by place is a **read-only lens**: it does **not** mark a month
+  reviewed (tracked only in the timeline's `seenReviewKeys`), so it never moves the curation %.
+- **Fast + warm.** A place chip / breadcrumb / exact-name query is an **O(1) name→photos lookup**
+  (`placeExact`, built once), not a full-library fuzzy scan; media + indexes are **warmed up** on
+  screen open so the first tap is instant.
+- **Reinstall survival.** The whole index (located photos *and* "no-GPS" markers) is mirrored, gzipped,
+  to **Downloads** keyed by **displayName+size** and **remapped to fresh MediaStore ids** on
+  reinstall/app-data-clear — so photos aren't re-EXIF-scanned. Same mechanism as the photo-hash / stats
+  backups; needs no extra permission (All-files access). A renamed/re-encoded file falls back to a
+  normal re-scan (its fingerprint changed).
 - **Why offline (not the OS geocoder).** Both platforms' reverse geocoders are **network-backed**
   (`android.location.Geocoder`, `CLGeocoder`); either would break the no-network claim and force a
   location declaration on the store privacy forms. The bundled k-d-tree lookup does it with zero network.

@@ -7,8 +7,12 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
 import androidx.core.view.isVisible
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import com.anant.mediacurator.databinding.ActivitySearchBinding
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Dedicated search spoke (reached from the Home hub).
@@ -33,6 +37,27 @@ class SearchActivity : AppCompatActivity() {
     private var placeSort = PlaceSort.COUNT
     private val countryFlags: Map<String, String> by lazy { loadCountryFlags() }
 
+    // Pending album-move state (mirrors the gallery / Hidden move flow).
+    private var pendingMoveItems: List<MediaItem>? = null
+    private var pendingMovePath: String? = null
+    private var pendingMoveTargetName: String? = null
+
+    private val moveLauncher =
+        registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult()) { result ->
+            if (result.resultCode == android.app.Activity.RESULT_OK) {
+                val items = pendingMoveItems ?: return@registerForActivityResult
+                val path = pendingMovePath ?: return@registerForActivityResult
+                val targetName = pendingMoveTargetName ?: return@registerForActivityResult
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) { moveItemsDirect(items, path) }
+                    android.widget.Toast.makeText(this@SearchActivity, "Switched to $targetName", android.widget.Toast.LENGTH_SHORT).show()
+                    clearPendingMove()
+                    exitSelectionMode()
+                    viewModel.refreshAfterExternalChange()
+                }
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -47,10 +72,11 @@ class SearchActivity : AppCompatActivity() {
             onYearToggle      = { },
             onMonthToggle     = { },
             onSubGroupToggle  = { },
-            onSelectionChanged = { }
+            onSelectionChanged = { count -> updateSelectionBar(count) }
         )
         binding.recyclerView.layoutManager = GridLayoutManager(this, 3)
         binding.recyclerView.adapter = adapter
+        setupSelectionBar()
 
         binding.searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
             override fun onQueryTextSubmit(query: String?): Boolean {
@@ -73,6 +99,7 @@ class SearchActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
+                    adapter.selectionMode     -> exitSelectionMode()
                     currentQuery.isNotEmpty() -> { drillCity = null; binding.searchView.setQuery("", false); hideKeyboard() }
                     drillState != null        -> { drillState = null; renderBrowse() }
                     drillCountry != null      -> { drillCountry = null; renderBrowse() }
@@ -123,6 +150,7 @@ class SearchActivity : AppCompatActivity() {
         // Per-photo place records → browse chips (Option A cities / Option B drill-down).
         viewModel.placeRecords.observe(this) { records = it; renderBrowse() }
         viewModel.loadPlaces()
+        viewModel.warmUp()   // pre-load media + place index while the user reads the chips
 
         binding.btnStats.setOnClickListener { StatsDialog.present(this) }
 
@@ -154,11 +182,11 @@ class SearchActivity : AppCompatActivity() {
         binding.chipSort.isVisible = true
         binding.chipSort.text = if (placeSort == PlaceSort.COUNT) "Sort: most photos" else "Sort: A–Z"
         if (mode == "B") {
-            binding.tvPlacesLabel.text = "Drill down by location"
+            binding.tvPlacesLabel.text = "Drill down"
             binding.chipPlaces.removeAllViews()
             renderDrill(binding.chipPlaces)
         } else {
-            binding.tvPlacesLabel.text = "Browse by location"
+            binding.tvPlacesLabel.text = "By city"
             binding.tvBreadcrumb.isVisible = false
             binding.chipPlaces.removeAllViews()
             for (p in PlaceBrowse.cities(records, placeSort).take(300))
@@ -310,6 +338,218 @@ class SearchActivity : AppCompatActivity() {
         R.id.action_help     -> { startActivity(Intent(this, HelpActivity::class.java)); true }
         R.id.action_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
         else -> super.onOptionsItemSelected(item)
+    }
+
+    // ── Multi-select action bar (Share / Delete) over the results grid ───────────────
+
+    private fun setupSelectionBar() {
+        binding.btnShareSelected.setOnClickListener {
+            val selected = adapter.getSelectedItems()
+            if (selected.isEmpty()) return@setOnClickListener
+            shareItems(selected)
+        }
+        binding.btnDeleteSelected.setOnClickListener {
+            val selected = adapter.getSelectedItems()
+            if (selected.isEmpty()) return@setOnClickListener
+            exitSelectionMode()
+            viewModel.deleteMedia(selected)
+        }
+        // Single-select actions.
+        binding.btnRenameSelected.setOnClickListener {
+            adapter.getSelectedItems().singleOrNull()?.let { showRenameDialog(it) }
+        }
+        binding.btnMoveSelected.setOnClickListener {
+            val item = adapter.getSelectedItems().singleOrNull() ?: return@setOnClickListener
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+                android.widget.Toast.makeText(this, "Move requires Android 10+", android.widget.Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            showAlbumPicker(listOf(item))
+        }
+        binding.btnGallerySelected.setOnClickListener {
+            adapter.getSelectedItems().singleOrNull()?.let { takeMeToGallery(it) }
+        }
+    }
+
+    private fun updateSelectionBar(count: Int) {
+        if (count > 0) {
+            val totalBytes = adapter.getSelectedItems().sumOf { it.size }
+            binding.tvSelectionCount.text = "$count selected · ${GalleryAdapter.fmtBytes(totalBytes)}"
+            // Rename + Show-in-gallery act on one photo; Share/Switch Album/Delete work on any count.
+            val single = count == 1
+            binding.btnRenameSelected.isVisible = single
+            binding.btnGallerySelected.isVisible = single
+            binding.selectionBar.isVisible = true
+        } else {
+            binding.selectionBar.isVisible = false
+        }
+    }
+
+    /** Rename dialog (base name only; extension preserved), then rename on disk + refresh. */
+    private fun showRenameDialog(item: MediaItem) {
+        val fullName = item.displayName
+        val dotIdx = fullName.lastIndexOf('.')
+        val baseName = if (dotIdx > 0) fullName.substring(0, dotIdx) else fullName
+        val ext = if (dotIdx > 0) fullName.substring(dotIdx) else ""
+        val input = android.widget.EditText(this).apply {
+            setText(baseName); setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        }
+        val pad = (24 * resources.displayMetrics.density).toInt()
+        val wrapper = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, 0, pad, 0)
+            addView(input)
+        }
+        val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle("Rename")
+            .setView(wrapper)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Rename") { _, _ ->
+                val newBase = input.text.toString().trim()
+                if (newBase.isNotEmpty()) viewModel.renameMedia(item, newBase + ext)
+            }
+            .create()
+        dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        dialog.show()
+        input.post { input.requestFocus(); input.selectAll() }
+    }
+
+    // ── Switch Album (move) — mirrors the gallery / Hidden move flow ─────────────────
+
+    private fun showAlbumPicker(items: List<MediaItem>) {
+        lifecycleScope.launch {
+            val albums = fetchAlbums()
+            if (albums.isEmpty()) {
+                android.widget.Toast.makeText(this@SearchActivity, "No albums found", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val names = albums.keys.toTypedArray()
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(this@SearchActivity)
+                .setTitle("Switch Album")
+                .setItems(names) { _, which ->
+                    val targetName = names[which]
+                    val targetPath = albums[targetName] ?: return@setItems
+                    moveToAlbum(items, targetName, targetPath)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+    }
+
+    private suspend fun fetchAlbums(): LinkedHashMap<String, String> = withContext(Dispatchers.IO) {
+        val result = LinkedHashMap<String, String>()
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return@withContext result
+        val projection = arrayOf(
+            android.provider.MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+            android.provider.MediaStore.MediaColumns.RELATIVE_PATH
+        )
+        contentResolver.query(
+            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            projection, null, null,
+            "${android.provider.MediaStore.Images.Media.BUCKET_DISPLAY_NAME} ASC"
+        )?.use { cursor ->
+            val bucketCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+            val pathCol   = cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns.RELATIVE_PATH)
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(bucketCol) ?: continue
+                val path = cursor.getString(pathCol)   ?: continue
+                if (!result.containsKey(name)) result[name] = path
+            }
+        }
+        result
+    }
+
+    private fun moveToAlbum(items: List<MediaItem>, targetName: String, targetPath: String) {
+        val toMove = items.filter {
+            it.relativePath.trimEnd('/').lowercase() != targetPath.trimEnd('/').lowercase()
+        }
+        if (toMove.isEmpty()) {
+            android.widget.Toast.makeText(this, "Already in $targetName", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        pendingMoveItems = toMove
+        pendingMovePath = targetPath
+        pendingMoveTargetName = targetName
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            try {
+                val uris = toMove.map { android.net.Uri.parse(it.uri) }
+                val pi = android.provider.MediaStore.createWriteRequest(contentResolver, uris)
+                moveLauncher.launch(androidx.activity.result.IntentSenderRequest.Builder(pi.intentSender).build())
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(this, "Move failed: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                clearPendingMove()
+            }
+        } else {
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) { moveItemsDirect(toMove, targetPath) }
+                android.widget.Toast.makeText(this@SearchActivity, "Switched to $targetName", android.widget.Toast.LENGTH_SHORT).show()
+                clearPendingMove(); exitSelectionMode(); viewModel.refreshAfterExternalChange()
+            }
+        }
+    }
+
+    private fun moveItemsDirect(items: List<MediaItem>, targetPath: String) {
+        for (item in items) {
+            try {
+                contentResolver.update(android.net.Uri.parse(item.uri), android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, targetPath)
+                }, null, null)
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    private fun clearPendingMove() {
+        pendingMoveItems = null; pendingMovePath = null; pendingMoveTargetName = null
+    }
+
+    /**
+     * Open this photo in the **phone's own gallery** (same as the in-app viewer's "open in gallery"),
+     * so the user can favorite/edit it there — not the in-app timeline.
+     */
+    private fun takeMeToGallery(item: MediaItem) {
+        val mime = when (item.type) {
+            MediaType.IMAGE -> "image/*"
+            MediaType.VIDEO -> "video/*"
+            MediaType.AUDIO -> "audio/*"
+            MediaType.PDF   -> "application/pdf"
+        }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(android.net.Uri.parse(item.uri), mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            })
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "No gallery app found", android.widget.Toast.LENGTH_SHORT).show()
+        }
+        exitSelectionMode()
+    }
+
+    private fun exitSelectionMode() {
+        adapter.exitSelectionMode()
+        binding.selectionBar.isVisible = false
+    }
+
+    /** Share via the system sheet — MediaStore content:// URIs are shareable with a read grant. */
+    private fun shareItems(items: List<MediaItem>) {
+        val uris = ArrayList(items.map { android.net.Uri.parse(it.uri) })
+        val types = items.map { it.type }.toSet()
+        val mime = when {
+            types == setOf(MediaType.IMAGE) -> "image/*"
+            types == setOf(MediaType.VIDEO) -> "video/*"
+            types == setOf(MediaType.AUDIO) -> "audio/*"
+            types == setOf(MediaType.PDF)   -> "application/pdf"
+            else                            -> "*/*"
+        }
+        val intent = if (uris.size == 1) {
+            Intent(Intent.ACTION_SEND).apply { type = mime; putExtra(Intent.EXTRA_STREAM, uris[0]) }
+        } else {
+            Intent(Intent.ACTION_SEND_MULTIPLE).apply { type = mime; putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris) }
+        }
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(Intent.createChooser(intent, "Share ${uris.size} item${if (uris.size > 1) "s" else ""}"))
+        } catch (e: Exception) { /* no share target */ }
     }
 
     private fun openViewer(item: MediaItem) {

@@ -34,6 +34,15 @@
                 android:textColor="@color/on_surface_variant"
                 android:textSize="15sp" />
 
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="6dp"
+                android:text="Curate by Timeline"
+                android:textColor="@color/on_surface"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardHero"
                 android:layout_width="match_parent"
@@ -144,10 +153,44 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
+            <!-- Browse by Location — the geo lens: the same photos by where they were taken. -->
+            <TextView
+                android:id="@+id/tvPlaceLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="6dp"
+                android:text="Browse by Location"
+                android:textColor="@color/on_surface"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/chipSearchModes"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:chipSpacingHorizontal="16dp">
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipSearchA"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:chipMinHeight="48dp"
+                    android:text="By City" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipSearchB"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:chipMinHeight="48dp"
+                    android:text="Drill down" />
+            </com.google.android.material.chip.ChipGroup>
+
             <!-- Hidden months — full-width, sits right under the hero as the back half of the
                  curation loop (review → hide → manage hidden), not a utility tile. -->
             <include layout="@layout/item_home_card" android:id="@+id/cardHidden"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
                 android:layout_marginBottom="10dp" />
 
             <LinearLayout
@@ -172,35 +215,6 @@
                 <include layout="@layout/item_home_card" android:id="@+id/cardTrash"
                     android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
             </LinearLayout>
-
-            <TextView
-                android:id="@+id/tvPlaceLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="Search by place"
-                android:textColor="@color/on_surface_variant"
-                android:textSize="12sp" />
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/chipSearchModes"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                app:chipSpacing="8dp">
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipSearchA"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Browse by location" />
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipSearchB"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Drill down by location" />
-            </com.google.android.material.chip.ChipGroup>
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
