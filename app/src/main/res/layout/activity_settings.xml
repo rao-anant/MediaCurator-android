@@ -109,7 +109,8 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="3dp"
                             android:lineSpacingExtra="2dp"
-                            android:text="Search photos by where they were taken. Reads each photo's own location and matches it to a city — fully on your device, no internet. Needs location access.\n\nCity data © GeoNames (CC BY)."
+                            android:autoLink="web"
+                            android:text="Search photos by where they were taken. Reads each photo's own location and matches it to a city — fully on your device, no internet. Needs location access.\n\nPlace data © GeoNames (https://www.geonames.org), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)."
                             android:textColor="@color/on_surface_variant"
                             android:textSize="13sp" />
                     </LinearLayout>

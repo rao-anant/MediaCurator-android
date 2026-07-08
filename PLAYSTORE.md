@@ -40,6 +40,19 @@ permission. It is the canonical use case in Google's own policy documentation.
 
 ---
 
+## ACCESS_MEDIA_LOCATION (place search, v1.1)
+No special Permissions Declaration form is required for this permission (that form is only for
+background location, SMS/Call Log, and All-files access). If review asks why the app requests it:
+
+> ACCESS_MEDIA_LOCATION is used only to read a photo's own GPS on-device and match it to a city for
+> offline place search. No location data is transmitted or stored off the device — the app has no
+> internet access. The permission is read-only; the app never writes to photos.
+
+This stays consistent with Data safety = "no data collected" (on-device-only use is not "collection"
+per Google's definition, since nothing is transmitted off the device).
+
+---
+
 ## Store listing — Short description (≤ 80 chars)
 ```
 Turbocharge curating your photos, videos and PDFs, and enjoy the time reclaimed.
@@ -95,6 +108,8 @@ hiding keeps reviewed items out of your way, so curation stays fast and even fun
 🔍 SEARCH
 • Search by filename, with fuzzy matching that forgives typos ("flwoer" still finds "flower")
 • Search inside your PDFs — find a document by a word on one of its pages
+• Search by place — find photos by the city, region, or country where you took them, or browse
+  them by location. Works fully offline; your locations never leave your phone
 
 📄 PDF SUPPORT
 • Browse, view, and delete PDFs alongside your media
@@ -104,17 +119,27 @@ hiding keeps reviewed items out of your way, so curation stays fast and even fun
 • No internet access — ever. No accounts, no sign-in
 • No ads, no analytics, no third-party tracking or crash-reporting SDKs
 • Your media never leaves your device
-• The app writes only small local helper files (your reviewed-months list and the PDF and
-  duplicate search indexes) — never your photos or any personal data
+• The app writes only small local helper files (your reviewed-months list, and the PDF,
+  duplicate, and place search indexes) — never your photos or any personal data
 
 🔑 PERMISSIONS
 • Photos / Videos / Audio: to display your library
 • All files access (Android 11+): to find and manage PDF files in Downloads, Documents,
   and other folders
+• Photo location (optional): reads each photo's own location on your device to tag it with a
+  city for place search — no location ever leaves your phone
 
 Perfect for anyone who wants to periodically clean up their camera roll, reclaim storage,
 and methodically work through years of media — without ever handing their photos to a
 third party.
+```
+
+---
+
+## What's new (release notes) — v1.1
+```
+• Search and browse your photos by place — the city, region, and country where you took them.
+• Fully offline, like everything else — nothing leaves your device.
 ```
 
 ---
