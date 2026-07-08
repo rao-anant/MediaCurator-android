@@ -100,8 +100,9 @@ Given four booleans, exactly one bar state is shown:
 
 - `showHideButton` — the month is fully **reviewed**.
 - `reachedEnd` — the month is **walked** (this session) **or** the revisit shortcut applies.
-- `scrollHintRetired` — the user has hidden their first month or dismissed the teaser (after that,
-  reviewed months jump straight to Hide at the end, no teaser).
+- `scrollHintRetired` — the user has **explicitly dismissed a hint via its ✕**. Hiding a month does
+  **not** retire the hints (they keep helping on later months); only the ✕ sets this flag. After that,
+  reviewed months jump straight to Hide at the end, no teaser.
 - `hasReviewHint` — there's a still-unreviewed section worth nudging toward.
 
 Decision table (first matching row wins):

@@ -195,9 +195,9 @@ class PreferencesManager(context: Context) {
     }
 
     /**
-     * "Scroll through to hide" teaser hint: retired once the user hides their first month (they've
-     * understood the loop) or explicitly dismisses it. After that, long reviewed months simply show
-     * the live Hide bar at the end with no teaser.
+     * Coach hints (scroll teaser + review nudge): retired **only** when the user explicitly dismisses
+     * a hint via its ✕. Hiding a month does NOT retire them, so they keep helping on every later month
+     * until that deliberate dismiss. After retiring, reviewed months just show the live Hide bar.
      */
     fun isScrollHintRetired(): Boolean = prefs.getBoolean(KEY_SCROLL_HINT_RETIRED, false)
     fun setScrollHintRetired() {

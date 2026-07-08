@@ -30,8 +30,8 @@ object HideBarDecision {
      *                         with all type filters on (the review-key gate).
      * @param reachedEnd       the user has walked to the end this session, OR the month was walked
      *                         on a prior visit at the same-or-greater item count (revisit skip).
-     * @param scrollHintRetired the user has hidden their first month or dismissed the teaser — after
-     *                         that, reviewed months jump straight to HIDE at the end with no teaser.
+     * @param scrollHintRetired the user has explicitly dismissed a hint via its ✕ (hiding a month does
+     *                         NOT retire) — after that, reviewed months jump straight to HIDE, no teaser.
      * @param hasReviewHint    there is a still-unreviewed section worth nudging toward.
      */
     fun decide(

@@ -584,7 +584,8 @@ class MainActivity : AppCompatActivity() {
      *     want — hide {Month} at the end").
      *   • reviewed + reached the end → live green **"Hide {Month}"** (tappable) + first-run coach-mark.
      *   • otherwise (e.g. hint retired, or nothing reviewable) → bar hidden.
-     * All hints share the amber down-chevron wave and are retired together (first hide / dismiss).
+     * All hints share the amber down-chevron wave and are retired together — but **only** when the
+     * user taps a hint's ✕. Hiding a month does NOT retire them, so they keep helping on later months.
      */
     private fun updateHideBar() {
         updateEndReached()
@@ -776,7 +777,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hideMonthWithUndo(year: Int, month: Int, label: String) {
-        viewModel.prefs.setScrollHintRetired()   // first successful hide → user understands; retire teaser
+        // Hiding a month no longer retires the coach hints — they keep helping on later months until
+        // the user taps a hint's ✕ (that dismiss is the only thing that sets the retired flag).
         viewModel.markMonthDone(year, month)
         com.google.android.material.snackbar.Snackbar
             .make(binding.root, "$label hidden from this app", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
