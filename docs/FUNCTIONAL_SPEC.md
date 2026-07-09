@@ -480,7 +480,7 @@ local place cache).
   "imrahor", "München" → "munchen"), typo-tolerant. Aliases resolve Bangalore↔Bengaluru, Bombay↔Mumbai.
 - **Browse** — two entry points on Home (gated: dimmed until ≥1 place is indexed):
   - **Browse by location (A):** a flat, ranked list of **city** chips (🏙️) — tap for its photos.
-  - **Drill down by location (B):** **country** (real flag 🇩🇪) → **state** (🚩) → **city** (🏙️), with
+  - **By Country (B):** **country** (real flag 🇩🇪) → **state** (🚩) → **city** (🏙️), with
     a **teal clickable breadcrumb** (Germany › Hesse › Kelsterbach) shown while drilling and over the
     photos — each segment navigates. City-states (no admin level, e.g. Singapore) show cities directly
     under the country. Phone **Back walks up one level**; the ‹ toolbar arrow jumps to Home.

@@ -182,7 +182,7 @@ class SearchActivity : AppCompatActivity() {
         binding.chipSort.isVisible = true
         binding.chipSort.text = if (placeSort == PlaceSort.COUNT) "Sort: most photos" else "Sort: A–Z"
         if (mode == "B") {
-            binding.tvPlacesLabel.text = "Drill down"
+            binding.tvPlacesLabel.text = "By Country"
             binding.chipPlaces.removeAllViews()
             renderDrill(binding.chipPlaces)
         } else {
