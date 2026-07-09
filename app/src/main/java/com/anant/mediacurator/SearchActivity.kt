@@ -160,6 +160,16 @@ class SearchActivity : AppCompatActivity() {
             binding.searchView.isIconified = false
             binding.searchView.requestFocus()
         }
+
+        // First-run place-search intro — shown exactly once, ever (what won't appear + how to search).
+        binding.btnIntroDismiss.setOnClickListener { binding.introBanner.isVisible = false }
+        if (intent.hasExtra(EXTRA_PLACE_BROWSE_MODE)) {
+            val p = PreferencesManager(this)
+            if (!p.wasPlaceIntroShown()) {
+                binding.introBanner.isVisible = true
+                p.setPlaceIntroShown()
+            }
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean { finish(); return true }

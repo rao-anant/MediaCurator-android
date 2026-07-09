@@ -204,6 +204,12 @@ class PreferencesManager(context: Context) {
         prefs.edit().putBoolean(KEY_SCROLL_HINT_RETIRED, true).apply()
     }
 
+    /** First-run place-search intro banner (what won't appear + how to search): shown exactly once. */
+    fun wasPlaceIntroShown(): Boolean = prefs.getBoolean(KEY_PLACE_INTRO_SHOWN, false)
+    fun setPlaceIntroShown() {
+        prefs.edit().putBoolean(KEY_PLACE_INTRO_SHOWN, true).apply()
+    }
+
     /**
      * Months the user has already fully reviewed AND scrolled through (footer reached), stored with
      * the month's full item count. On a later visit with the same count (no new photos), the Hide
@@ -257,6 +263,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_LAST_BATCH                 = "last_deleted_batch"
         private const val KEY_ALL_FILES_PROMPT_SHOWN    = "all_files_prompt_shown"
         private const val KEY_HIDDEN_RESTORE_OFFERED     = "hidden_restore_offered"
+        private const val KEY_PLACE_INTRO_SHOWN          = "place_intro_shown"
 
         /**
          * Every key wiped by [resetCurationProgress] — hidden months, reviewed/walked markers,
