@@ -513,6 +513,15 @@ local place cache).
   match are platform-independent — mirror in Kotlin/Swift (same pattern as the pure `CurationLogic` rules).
 - **Accuracy / limits:** city-level, not neighborhood/POI; only GPS-tagged photos match (WhatsApp /
   screenshots / downloads strip EXIF — universal). Place data never leaves the device.
+- **Expectation-setting (in-app).** Two honest, low-friction notes so approximate matching + missing
+  photos don't read as bugs:
+  - **Settings** — the Place search description states matches are approximate (nearest known city)
+    and only photos that saved a location appear.
+  - **First-run banner** — the very first time a place-browse screen is opened, a one-time card
+    (persisted via `place_intro_shown`, never shown again) explains what won't appear (screenshots /
+    WhatsApp / downloads) and the ways to explore (type a place — **no quotes needed for multi-word
+    names**; tap a city under By City; drill under By Country). "Got it" dismisses; the flag is set on
+    first show so it can't reappear even if not tapped.
 
 ---
 

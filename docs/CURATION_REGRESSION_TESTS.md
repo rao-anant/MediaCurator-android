@@ -260,3 +260,8 @@ must be mirrored on iOS.
   selection bars *and* the single-photo **Viewer** toolbar, with the same single-vs-multi visibility
   rule. A single photo exposes the identical actions whether opened by short press (Viewer) or long
   press (selection bar).
+- **PU-9 — First-run place intro (once, ever).** Opening a place-browse screen for the first time
+  shows the intro banner (what won't appear + ways to explore); the `place_intro_shown` flag is set on
+  that first show, so it never reappears — whether or not the user taps "Got it". Multi-word queries
+  (e.g. "san francisco") match without quotes; quotes are not a search feature and would break the
+  match. Settings carries the matching "approximate / only located photos" note.
