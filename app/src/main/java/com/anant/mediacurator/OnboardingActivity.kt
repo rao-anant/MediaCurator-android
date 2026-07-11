@@ -495,7 +495,7 @@ class OnboardingActivity : AppCompatActivity() {
     private fun showSummary() {
         binding.tvSummaryBody.text =
             "• You curated two months, in any order.\n" +
-            "• They stayed hidden in this app — never deleted, still in your gallery.\n" +
+            "• They stayed hidden only in this app — never deleted, still in your gallery.\n" +
             "• When you came back, the hidden months stayed hidden.\n" +
             "• So you moved on to what's new — real, lasting progress."
         binding.tvYear.visibility = View.GONE
