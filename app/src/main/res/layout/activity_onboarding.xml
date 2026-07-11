@@ -106,17 +106,17 @@
                     android:layout_height="wrap_content"
                     android:text="That's the whole loop"
                     android:textColor="@color/check_green"
-                    android:textSize="16sp"
+                    android:textSize="19sp"
                     android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/tvSummaryBody"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:lineSpacingExtra="5dp"
-                    android:textColor="@color/on_surface_variant"
-                    android:textSize="14sp" />
+                    android:layout_marginTop="14dp"
+                    android:lineSpacingExtra="7dp"
+                    android:textColor="@color/on_surface"
+                    android:textSize="16sp" />
             </LinearLayout>
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>

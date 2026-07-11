@@ -497,7 +497,7 @@ class OnboardingActivity : AppCompatActivity() {
             "• You curated two months, in any order.\n" +
             "• They stayed hidden only in this app — never deleted, still in your gallery.\n" +
             "• When you came back, the hidden months stayed hidden.\n" +
-            "• So you moved on to what's new — real, lasting progress."
+            "• So you moved on to what's new, making real, lasting progress."
         binding.tvYear.visibility = View.GONE
         binding.demoStack.visibility = View.GONE
         binding.tvCaption.visibility = View.GONE
