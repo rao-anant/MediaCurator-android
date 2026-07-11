@@ -12,163 +12,95 @@
         android:orientation="vertical"
         android:padding="20dp">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="How curating works"
-        android:textColor="@color/on_surface"
-        android:textSize="22sp"
-        android:textStyle="bold" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="How curating works"
+            android:textColor="@color/on_surface"
+            android:textSize="22sp"
+            android:textStyle="bold" />
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:lineSpacingExtra="2dp"
-        android:text="Review a month, hide it, and it steps out of your way — so you never scroll past the same photos again."
-        android:textColor="@color/on_surface_variant"
-        android:textSize="14sp" />
-
-    <!-- The "phone screen" demo surface -->
-    <androidx.core.widget.NestedScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="20dp"
-        android:fillViewport="true">
-
-        <LinearLayout
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="@drawable/onboard_screen_bg"
-            android:padding="16dp">
+            android:layout_marginTop="6dp"
+            android:lineSpacingExtra="2dp"
+            android:text="Tap through at your own pace — review a month, hide it, and it steps out of your way."
+            android:textColor="@color/on_surface_variant"
+            android:textSize="14sp" />
 
-            <TextView
-                android:id="@+id/tvCaption"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:minHeight="40dp"
-                android:gravity="center"
-                android:lineSpacingExtra="2dp"
-                android:text="Press play to see how curating works."
-                android:textColor="@color/on_surface_variant"
-                android:textSize="13sp" />
-
-            <TextView
-                android:id="@+id/tvYear"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:layout_marginStart="2dp"
-                android:text="2024"
-                android:textColor="@color/on_surface_variant"
-                android:textSize="13sp"
-                android:textStyle="bold" />
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="18dp"
+            android:fillViewport="true">
 
             <LinearLayout
-                android:id="@+id/demoStack"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:orientation="vertical" />
-
-            <!-- Floating confirmation shown briefly after a demo delete -->
-            <TextView
-                android:id="@+id/tvDeletedToast"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center_horizontal"
-                android:layout_marginTop="14dp"
-                android:background="@drawable/teaser_bar_bg"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:text="Deleted photos you didn't want to keep"
-                android:textColor="@color/on_surface"
-                android:textSize="12sp"
-                android:visibility="gone" />
-
-            <!-- End-of-demo recap — stays until the user closes or opts out. -->
-            <LinearLayout
-                android:id="@+id/summaryBox"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:paddingTop="8dp"
-                android:visibility="gone">
+                android:background="@drawable/onboard_screen_bg"
+                android:padding="16dp">
 
-                <TextView
+                <LinearLayout
+                    android:id="@+id/dots"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="That's the whole loop"
-                    android:textColor="@color/check_green"
-                    android:textSize="19sp"
-                    android:textStyle="bold" />
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginBottom="14dp"
+                    android:orientation="horizontal" />
 
-                <TextView
-                    android:id="@+id/tvSummaryBody"
+                <LinearLayout
+                    android:id="@+id/slideContainer"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:lineSpacingExtra="7dp"
-                    android:textColor="@color/on_surface"
-                    android:textSize="16sp" />
+                    android:orientation="vertical" />
             </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+
+        <LinearLayout
+            android:id="@+id/navRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnBack"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Back" />
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnNext"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Next" />
         </LinearLayout>
-    </androidx.core.widget.NestedScrollView>
 
-    <!-- Transport controls (hidden in the mandatory first-run mode) -->
-    <LinearLayout
-        android:id="@+id/controlsRow"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="14dp"
-        android:orientation="horizontal"
-        android:gravity="center">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnRewind"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+        <CheckBox
+            android:id="@+id/cbDontShowAgain"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
-            android:text="Rewind" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnPlay"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
-            android:text="Play" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnPause"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Pause" />
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="4dp"
+            android:text="Don't show again"
+            android:textColor="@color/on_surface"
+            android:textSize="15sp"
+            android:buttonTint="@color/primary"
+            android:visibility="gone" />
     </LinearLayout>
 
-    <!-- Replaces the old "Get started": tick to never auto-show the demo again -->
-    <CheckBox
-        android:id="@+id/cbDontShowAgain"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginTop="14dp"
-        android:layout_marginBottom="4dp"
-        android:text="Don't show again"
-        android:textColor="@color/on_surface"
-        android:textSize="15sp"
-        android:buttonTint="@color/primary" />
-    </LinearLayout>
-
-    <!-- Close (✕) — appears at the end of the mandatory run, or always in replay -->
     <TextView
         android:id="@+id/btnCloseDemo"
         android:layout_width="44dp"
@@ -184,7 +116,6 @@
         android:contentDescription="Close"
         android:visibility="gone" />
 
-    <!-- Floating finger that "taps" the Delete / Hide buttons during the demo -->
     <TextView
         android:id="@+id/tapFinger"
         android:layout_width="44dp"

@@ -1,8 +1,5 @@
 package com.anant.mediacurator
 
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
-import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -23,30 +20,26 @@ import androidx.core.content.ContextCompat
 import com.anant.mediacurator.databinding.ActivityOnboardingBinding
 
 /**
- * First-run (and replayable) animated explainer for the core "hide a month" idea.
+ * First-run (and replayable) explainer for the core "hide a month" idea, as a **self-paced deck**:
+ * the viewer taps Next / Back through a few slides, so nothing races off-screen. Only the one action
+ * slide animates (finger → delete junk → hide → the month tucks into a named "Hidden" shelf); the
+ * rest are calm states the reader dwells on as long as they like.
  *
- * Drives a small fake gallery — three month cards, each a pile of photo tiles — through the
- * curation loop: review → tap "Hide month" → the month collapses away → the progress bar fills
- * → "All caught up." Plays automatically when opened; Rewind / Play / Pause let the user re-watch.
+ * Slides: 0 backlog · 1 review + hide (animated) · 2 come back (it remembers) · 3 recap.
  */
 class OnboardingActivity : AppCompatActivity() {
 
     companion object {
-        /** When true, the screen is opened from Help as a replay (primary button says "Done"). */
+        /** When true, opened from Help as a replay (closeable anytime, no mandatory opt-out). */
         const val EXTRA_REPLAY = "replay"
 
-        /** Muted-but-distinct colours so each tile clearly reads as a different item. */
-        private val TILE_COLORS = intArrayOf(
-            Color.parseColor("#5C8AC6"), // blue
-            Color.parseColor("#5BB89A"), // teal
-            Color.parseColor("#D08A5B"), // coral
-            Color.parseColor("#C76F97"), // pink
-            Color.parseColor("#9B8AD4"), // purple
-            Color.parseColor("#C9A95B"), // amber
-            Color.parseColor("#7FB05B")  // green
-        )
+        private const val TOTAL_SLIDES = 4
 
-        /** A spread of little pictures so tiles read as varied content, not blank swatches. */
+        private val TILE_COLORS = intArrayOf(
+            Color.parseColor("#5C8AC6"), Color.parseColor("#5BB89A"), Color.parseColor("#D08A5B"),
+            Color.parseColor("#C76F97"), Color.parseColor("#9B8AD4"), Color.parseColor("#C9A95B"),
+            Color.parseColor("#7FB05B")
+        )
         private val TILE_EMOJI = arrayOf(
             "🌅", "🐶", "🎂", "🏖️", "🐱", "🌸", "🍕", "🚗", "🎸",
             "🏔️", "🐠", "🌮", "🎈", "🌻", "🍎", "🐦", "🚀", "🎨"
@@ -56,19 +49,16 @@ class OnboardingActivity : AppCompatActivity() {
     private lateinit var binding: ActivityOnboardingBinding
     private val handler = Handler(Looper.getMainLooper())
     private val prefs by lazy { PreferencesManager(this) }
-    private var replay = false          // opened from Help (not mandatory)
-    private var demoCompleted = false   // the timeline has played through at least once
+    private var replay = false
+    private var demoCompleted = false
+    private var slideIndex = 0
 
-    private data class Demo(val card: LinearLayout, val pill: TextView, val body: GridLayout,
-                            val arrow: TextView, val deletePill: TextView,
-                            val deleteIndices: List<Int>, val header: LinearLayout)
-    private val demos = mutableListOf<Demo>()
+    private val dotViews = mutableListOf<View>()
 
-    private var stepIndex = 0
-    private var playing = false
-
-    private val months = listOf("March" to 9, "April" to 6, "May" to 8, "June" to 5)
-    private lateinit var steps: List<Pair<Long, () -> Unit>>
+    // Refs for the review slide's post-hide reveal.
+    private var reviewShelf: LinearLayout? = null
+    private var reviewShelfNames: TextView? = null
+    private var reviewReassure: View? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,36 +67,27 @@ class OnboardingActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         replay = intent.getBooleanExtra(EXTRA_REPLAY, false)
+        binding.btnCloseDemo.visibility = if (replay) View.VISIBLE else View.GONE
 
-        binding.btnRewind.setOnClickListener { rewind() }
-        binding.btnPlay.setOnClickListener { play() }
-        binding.btnPause.setOnClickListener { pause() }
-        binding.btnCloseDemo.setOnClickListener { finish() }   // close without opting out
+        binding.btnBack.setOnClickListener { goBack() }
+        binding.btnNext.setOnClickListener { goNext() }
+        binding.btnCloseDemo.setOnClickListener { finish() }
         binding.cbDontShowAgain.setOnCheckedChangeListener { _, checked ->
             if (checked && demoCompleted) optOutAndFinish()
         }
 
-        if (replay) {
-            // Replay from Help: watchable & closeable anytime, no opt-out control.
-            binding.controlsRow.visibility = View.VISIBLE
-            binding.cbDontShowAgain.visibility = View.GONE
-            binding.btnCloseDemo.visibility = View.VISIBLE
-        } else {
-            // Mandatory first-run: no transport controls, must watch to the end.
-            binding.controlsRow.visibility = View.GONE
-            binding.cbDontShowAgain.visibility = View.VISIBLE
-            binding.btnCloseDemo.visibility = View.GONE        // appears when the demo finishes
-        }
-
-        // Block Back until the demo has played through (mandatory mode); always allow in replay.
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (replay || demoCompleted) finish()
+                when {
+                    slideIndex > 0 -> goBack()                 // step back through the deck
+                    replay -> finish()                          // replay: closeable at slide 0
+                    // mandatory first run: block exit until the deck is walked through
+                }
             }
         })
 
-        renderInitial()   // builds the cards and the step timeline (shuffled)
-        binding.demoStack.post { play() }   // auto-play on open (both first-run and replay)
+        buildDots()
+        binding.root.post { renderSlide() }
     }
 
     override fun onDestroy() {
@@ -114,521 +95,330 @@ class OnboardingActivity : AppCompatActivity() {
         handler.removeCallbacksAndMessages(null)
     }
 
-    // ── Rendering ────────────────────────────────────────────────────────────
+    // ── Navigation ───────────────────────────────────────────────────────────
 
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-
-    private fun renderInitial() {
-        playing = false
-        handler.removeCallbacksAndMessages(null)
-        stepIndex = 0
-        demos.clear()
-        binding.demoStack.removeAllViews()
-        binding.demoStack.alpha = 1f
-        binding.demoStack.visibility = View.VISIBLE
-        binding.tvYear.visibility = View.VISIBLE
-        binding.tvYear.alpha = 1f
-        binding.tvCaption.visibility = View.VISIBLE
-        binding.summaryBox.visibility = View.GONE
-        binding.tvDeletedToast.animate().cancel()
-        binding.tvDeletedToast.visibility = View.GONE
-        binding.tapFinger.animate().cancel()
-        binding.tapFinger.visibility = View.INVISIBLE
-        binding.tvCaption.setTextColor(ContextCompat.getColor(this, R.color.on_surface_variant))
-        binding.tvCaption.text = "Press play to see how curating works."
-
-        months.forEachIndexed { idx, (label, count) ->
-            demos.add(buildCard(label, count, idx * 3, 2))
-        }
-        // Rebuild the timeline so a replay starts clean.
-        steps = buildSteps()
+    private fun goNext() {
+        if (slideIndex < TOTAL_SLIDES - 1) { slideIndex++; renderSlide() } else onDone()
     }
 
-    private fun cardBackground(highlighted: Boolean): GradientDrawable = GradientDrawable().apply {
-        cornerRadius = dp(12).toFloat()
-        setColor(ContextCompat.getColor(this@OnboardingActivity, R.color.background))
-        val strokeColor = if (highlighted) ContextCompat.getColor(this@OnboardingActivity, R.color.check_green)
-                          else ContextCompat.getColor(this@OnboardingActivity, R.color.surface_variant)
-        setStroke(dp(if (highlighted) 2 else 1), strokeColor)
+    private fun goBack() {
+        if (slideIndex > 0) { slideIndex--; renderSlide() }
     }
 
-    private fun buildCard(label: String, tileCount: Int, tileSeed: Int, deleteCount: Int, isNew: Boolean = false): Demo {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = cardBackground(false)
-            setPadding(dp(10), dp(8), dp(10), dp(10))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(8) }
-        }
-
-        val headerRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val arrow = TextView(this).apply {
-            text = "▸"
-            setTextColor(ContextCompat.getColor(this@OnboardingActivity, R.color.primary))
-            textSize = 12f
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { marginEnd = dp(8) }
-        }
-        val title = TextView(this).apply {
-            text = label
-            setTextColor(ContextCompat.getColor(this@OnboardingActivity, R.color.on_surface))
-            textSize = 14f
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val deletePill = TextView(this).apply {
-            text = "🗑 Delete"
-            textSize = 11f
-            setTextColor(ContextCompat.getColor(this@OnboardingActivity, android.R.color.white))
-            setPadding(dp(10), dp(4), dp(10), dp(4))
-            background = GradientDrawable().apply {
-                cornerRadius = dp(20).toFloat()
-                setColor(ContextCompat.getColor(this@OnboardingActivity, R.color.delete_red))
-            }
-            visibility = View.GONE
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { marginEnd = dp(6) }
-        }
-        val pill = TextView(this).apply {
-            text = "Hide month"
-            textSize = 11f
-            setTextColor(ContextCompat.getColor(this@OnboardingActivity, R.color.on_primary))
-            setPadding(dp(10), dp(4), dp(10), dp(4))
-            background = GradientDrawable().apply {
-                cornerRadius = dp(20).toFloat()
-                setColor(ContextCompat.getColor(this@OnboardingActivity, R.color.primary))
-            }
-            visibility = View.INVISIBLE
-        }
-        headerRow.addView(arrow)
-        headerRow.addView(title)
-        if (isNew) {
-            val newBadge = TextView(this).apply {
-                text = "new"
-                textSize = 10f
-                setTextColor(ContextCompat.getColor(this@OnboardingActivity, R.color.primary))
-                setPadding(dp(8), dp(2), dp(8), dp(2))
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(20).toFloat()
-                    setStroke(dp(1), ContextCompat.getColor(this@OnboardingActivity, R.color.primary))
-                }
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = dp(6) }
-            }
-            headerRow.addView(newBadge)
-        }
-        headerRow.addView(deletePill)
-        headerRow.addView(pill)
-        card.addView(headerRow)
-
-        // Content-tile grid (6 per row) so each card clearly reads as a pile of items. Each tile is
-        // a coloured swatch with a little picture, so it looks like varied content, not blank boxes.
-        // Starts collapsed (gone) — the animation "opens" each month before hiding it, like real use.
-        val grid = GridLayout(this).apply {
-            columnCount = 6
-            visibility = View.GONE
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(8) }
-        }
-        val cell = dp(34)
-        for (i in 0 until tileCount) {
-            // Each tile is a frame: the coloured emoji, a (hidden) red delete-wash, and a (hidden)
-            // check badge — so selecting-for-deletion reads clearly, like the app's selection.
-            val emoji = TextView(this).apply {
-                text = TILE_EMOJI[(tileSeed * 2 + i) % TILE_EMOJI.size]
-                gravity = Gravity.CENTER
-                textSize = 15f
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(3).toFloat()
-                    setColor(TILE_COLORS[(tileSeed + i) % TILE_COLORS.size])
-                }
-                layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            }
-            val scrim = View(this).apply {
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(3).toFloat()
-                    setColor(0x77B3261E.toInt())   // delete-red @ ~47% over the photo
-                }
-                visibility = View.GONE
-                layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            }
-            val badge = TextView(this).apply {
-                text = "✓"
-                gravity = Gravity.CENTER
-                textSize = 9f
-                setTextColor(Color.WHITE)
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(ContextCompat.getColor(this@OnboardingActivity, R.color.delete_red))
-                    setStroke(dp(1), Color.WHITE)
-                }
-                visibility = View.GONE
-                val b = dp(15)
-                layoutParams = FrameLayout.LayoutParams(b, b, Gravity.TOP or Gravity.END)
-            }
-            val frame = FrameLayout(this).apply {
-                layoutParams = GridLayout.LayoutParams().apply {
-                    width = cell; height = cell
-                    setMargins(dp(2), dp(2), dp(2), dp(2))
-                }
-                addView(emoji); addView(scrim); addView(badge)
-            }
-            grid.addView(frame)
-        }
-        card.addView(grid)
-
-        binding.demoStack.addView(card)
-        // Delete a fixed count for this month (1, 2 or 3 — assigned per month by the caller), at
-        // random positions, leaving at least a couple of tiles behind so the card still reads full.
-        val n = deleteCount.coerceIn(1, (tileCount - 2).coerceAtLeast(1))
-        val deleteIndices = (0 until tileCount).shuffled().take(n).sorted()
-        return Demo(card, pill, grid, arrow, deletePill, deleteIndices, headerRow)
-    }
-
-    // ── Animation primitives ─────────────────────────────────────────────────
-
-    private fun highlight(i: Int) {
-        demos.getOrNull(i)?.card?.background = cardBackground(true)
-    }
-
-    private fun showPill(i: Int) {
-        val d = demos.getOrNull(i) ?: return
-        d.deletePill.apply { animate().cancel(); visibility = View.GONE }   // never show Hide + Delete together
-        d.pill.apply {
-            alpha = 0f
-            visibility = View.VISIBLE
-            animate().alpha(1f).setDuration(350).start()
-        }
-    }
-
-    /** Finger taps the month's header, then the month opens. */
-    private fun openMonth(i: Int) {
-        val d = demos.getOrNull(i) ?: run { expand(i); return }
-        tapFinger(d.header) { expand(i) }
-    }
-
-    /** "Open" a collapsed month — slide its tile grid down, flip the arrow, and highlight it. */
-    private fun expand(i: Int) {
-        val d = demos.getOrNull(i) ?: return
-        val body = d.body
-        d.arrow.text = "▾"
-        highlight(i)
-        if (body.visibility == View.VISIBLE) return
-        body.visibility = View.VISIBLE
-        val widthSpec = View.MeasureSpec.makeMeasureSpec(
-            (d.card.width - d.card.paddingLeft - d.card.paddingRight).coerceAtLeast(1),
-            View.MeasureSpec.EXACTLY
-        )
-        body.measure(widthSpec, View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-        val target = body.measuredHeight
-        ValueAnimator.ofInt(0, target).apply {
-            duration = 550
-            addUpdateListener { a ->
-                body.layoutParams = body.layoutParams.apply { height = a.animatedValue as Int }
-            }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    body.layoutParams = body.layoutParams.apply {
-                        height = ViewGroup.LayoutParams.WRAP_CONTENT
-                    }
-                }
-            })
-            start()
-        }
-    }
-
-    /** Reveal one tile's selected state — red wash + check badge pop in. */
-    private fun revealSelection(frame: FrameLayout) {
-        frame.animate().scaleX(0.9f).scaleY(0.9f).setDuration(160).start()
-        frame.getChildAt(1)?.apply {   // red delete-wash
-            alpha = 0f; visibility = View.VISIBLE
-            animate().alpha(1f).setDuration(160).start()
-        }
-        frame.getChildAt(2)?.apply {   // check badge — pop in
-            scaleX = 0f; scaleY = 0f; visibility = View.VISIBLE
-            animate().scaleX(1f).scaleY(1f).setDuration(260)
-                .setInterpolator(OvershootInterpolator()).start()
-        }
-    }
-
-    private fun showDeletePill(d: Demo) {
-        if (d.deletePill.visibility == View.VISIBLE) return
-        d.deletePill.apply { alpha = 0f; visibility = View.VISIBLE; animate().alpha(1f).setDuration(200).start() }
-    }
-
-    /** The finger visits each target in turn and taps it (invoking [onTapEach]), then calls [onDone]. */
-    private fun fingerTapSequence(targets: List<View>, onTapEach: (Int) -> Unit, onDone: () -> Unit) {
-        if (targets.isEmpty()) { onDone(); return }
-        val finger = binding.tapFinger
-        finger.animate().cancel()
-        finger.translationX = 0f; finger.translationY = 0f
-        val fHome = IntArray(2); finger.getLocationOnScreen(fHome)
-        fun txTo(target: View): Pair<Float, Float> {
-            val t = IntArray(2); target.getLocationOnScreen(t)
-            return (t[0] + target.width / 2f) - (fHome[0] + finger.width / 2f) to
-                   (t[1] + target.height / 2f) - fHome[1] - dp(4)
-        }
-        finger.apply { alpha = 0f; scaleX = 1f; scaleY = 1f; visibility = View.VISIBLE }
-        fun tapAt(j: Int) {
-            if (j >= targets.size) {
-                // All selected — Delete only proceeds now, so the finger can't be cut off.
-                handler.postDelayed({ onDone() }, 250)
-                return
-            }
-            val (tx, ty) = txTo(targets[j])
-            finger.animate().alpha(1f).translationX(tx).translationY(ty)
-                .setDuration(if (j == 0) 220 else 180)
-                .withEndAction {
-                    finger.animate().scaleX(0.75f).scaleY(0.75f).setDuration(65).withEndAction {
-                        onTapEach(j)
-                        finger.animate().scaleX(1f).scaleY(1f).setDuration(65)
-                            .withEndAction { handler.postDelayed({ tapAt(j + 1) }, 35) }.start()
-                    }.start()
-                }.start()
-        }
-        tapAt(0)
-    }
-
-    /**
-     * The finger taps each to-be-deleted photo (its check pops on tap; Delete appears on the first),
-     * and only AFTER all are selected does it tap Delete (via [onAllSelected]) — so a 3-photo month
-     * can never have its 3rd tap cut off by a timer.
-     */
-    private fun selectForDelete(i: Int, onDone: () -> Unit) {
-        val d = demos.getOrNull(i) ?: return
-        val targets = d.deleteIndices.filter { it < d.body.childCount }.map { d.body.getChildAt(it) }
-        fingerTapSequence(targets, onTapEach = { j ->
-            (targets[j] as? FrameLayout)?.let { revealSelection(it) }
-            if (j == 0) showDeletePill(d)
-        }, onDone = onDone)
-    }
-
-    /** A finger moves onto [target] and taps it (synced with the button's own press via [onTap]). */
-    private fun tapFinger(target: View, onTap: () -> Unit) {
-        val finger = binding.tapFinger
-        finger.post { runTapFinger(target, onTap) }
-    }
-
-    private fun runTapFinger(target: View, onTap: () -> Unit) {
-        val finger = binding.tapFinger
-        finger.animate().cancel()
-        finger.translationX = 0f; finger.translationY = 0f     // read the finger's untranslated home
-        val fLoc = IntArray(2); finger.getLocationOnScreen(fLoc)
-        val tLoc = IntArray(2); target.getLocationOnScreen(tLoc)
-        // Move the fingertip (top-centre of the glyph) onto the target's centre.
-        val dx = (tLoc[0] + target.width / 2f) - (fLoc[0] + finger.width / 2f)
-        val dy = (tLoc[1] + target.height / 2f) - fLoc[1] - dp(4)
-        finger.apply {
-            translationX = dx + dp(12); translationY = dy + dp(16)   // approach from below-right
-            alpha = 0f; scaleX = 1.25f; scaleY = 1.25f
-            visibility = View.VISIBLE
-            animate().alpha(1f).scaleX(1f).scaleY(1f).translationX(dx).translationY(dy).setDuration(300)
-                .withEndAction {
-                    animate().scaleX(0.78f).scaleY(0.78f).setDuration(110).withEndAction {   // tap down
-                        onTap()
-                        animate().scaleX(1f).scaleY(1f).setDuration(110).withEndAction {       // release
-                            animate().alpha(0f).setStartDelay(250).setDuration(250)
-                                .withEndAction { visibility = View.INVISIBLE }.start()
-                        }.start()
-                    }.start()
-                }.start()
-        }
-    }
-
-    /**
-     * Finger taps the Delete button → selected tiles vanish + a floating confirmation pops up →
-     * then [onComplete] (chained, so the Hide pill only appears once the delete has fully finished —
-     * never overlapping the Delete button).
-     */
-    private fun confirmDelete(i: Int, onComplete: () -> Unit = {}) {
-        val d = demos.getOrNull(i) ?: return
-        tapFinger(d.deletePill) {
-            d.deletePill.animate().scaleX(0.85f).scaleY(0.85f).setDuration(120)
-                .withEndAction {
-                    d.deletePill.animate().scaleX(1f).scaleY(1f).setDuration(120)
-                        .withEndAction { d.deletePill.visibility = View.GONE }.start()
-                }.start()
-            d.deleteIndices.filter { it < d.body.childCount }.forEach { k ->
-                d.body.getChildAt(k).animate()
-                    .alpha(0f).scaleX(0.1f).scaleY(0.1f).setStartDelay(200).setDuration(450).start()
-            }
-            handler.postDelayed({ onComplete() }, 900)   // tiles gone → then reveal the Hide pill
-        }
-    }
-
-    /** Sticky snackbar (non-modal) that stays until [hideSnackbar]. Reassures that hiding ≠ deleting. */
-    private fun showSnackbarSticky(msg: String) {
-        binding.tvDeletedToast.apply {
-            text = msg
-            animate().cancel()
-            alpha = 0f
-            visibility = View.VISIBLE
-            animate().alpha(1f).setStartDelay(150).setDuration(350).start()
-        }
-    }
-
-    private fun hideSnackbar() {
-        binding.tvDeletedToast.animate().cancel()
-        binding.tvDeletedToast.animate().alpha(0f).setDuration(300)
-            .withEndAction { binding.tvDeletedToast.visibility = View.GONE }.start()
-    }
-
-    /** Re-render the stack as the user would see it on returning: the untouched months + a new one. */
-    private fun renderReturn() {
-        demos.clear()
-        binding.demoStack.removeAllViews()
-        buildCard("April", 6, 3, 2)
-        buildCard("June", 5, 9, 2)
-        buildCard("July", 7, 15, 2, isNew = true)
-    }
-
-    /** End-of-demo recap — stays until the user closes or opts out. */
-    private fun showSummary() {
-        binding.tvSummaryBody.text =
-            "• You curated two months, in any order.\n" +
-            "• They stayed hidden only in this app — never deleted, still in your gallery.\n" +
-            "• When you came back, the hidden months stayed hidden.\n" +
-            "• So you moved on to what's new, making real, lasting progress."
-        binding.tvYear.visibility = View.GONE
-        binding.demoStack.visibility = View.GONE
-        binding.tvCaption.visibility = View.GONE
-        binding.tvDeletedToast.visibility = View.GONE
-        binding.summaryBox.visibility = View.VISIBLE
-    }
-
-    /** Hide the month: finger taps the "Hide month" pill (press down→up), then the card collapses. */
-    private fun hideMonth(i: Int) {
-        val pill = demos.getOrNull(i)?.pill
-        if (pill == null) { collapse(i); return }
-        tapFinger(pill) {
-            pill.animate().scaleX(0.85f).scaleY(0.85f).setDuration(120)
-                .withEndAction {
-                    pill.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
-                    collapse(i)
-                }.start()
-        }
-    }
-
-    private fun collapse(i: Int) {
-        val card = demos.getOrNull(i)?.card ?: return
-        val start = card.height
-        if (start == 0) return
-        val anim = ValueAnimator.ofInt(start, 0).apply { duration = 600 }
-        anim.addUpdateListener { a ->
-            val lp = card.layoutParams
-            lp.height = a.animatedValue as Int
-            card.layoutParams = lp
-            card.alpha = (a.animatedValue as Int).toFloat() / start
-        }
-        anim.start()
-    }
-
-    // ── Step timeline ────────────────────────────────────────────────────────
-
-    private fun buildSteps(): List<Pair<Long, () -> Unit>> {
-        val steps = mutableListOf<Pair<Long, () -> Unit>>()
-        fun step(wait: Long, action: () -> Unit) { steps.add(wait to action) }
-        fun cap(text: String?) { text?.let { binding.tvCaption.text = it } }
-
-        step(1500L) { cap("Your months, waiting to be reviewed.") }
-
-        // Curate the 1st and 3rd month — deliberately non-adjacent, to show you can pick up any
-        // month in any order (not a top-to-bottom slog). Months 1 and 3 (April, June) are left alone.
-        val order = listOf(0, 2)
-        val openCap = listOf("Start with any month — say March.", "Jump straight to any other — skip to May.")
-        val delCap  = listOf("Delete the junk you don't want.", "Same again — delete the junk.")
-        val hideCap = listOf("Then hide the month — it vanishes.", "…then hide. Gone from your way.")
-
-        order.forEachIndexed { pos, m ->
-            step(2000L) { cap(openCap[pos]); openMonth(m) }
-            // Fully chained: finger selects every photo → taps Delete → tiles vanish → THEN the Hide
-            // pill appears (never overlapping the Delete button, regardless of device speed).
-            step(5200L) {
-                cap(delCap[pos])
-                selectForDelete(m) { confirmDelete(m) { showPill(m) } }
-            }
-            step(2200L) { cap(hideCap[pos]); hideMonth(m) }
-        }
-
-        // Payoff: what stays, then what happens when you come back.
-        step(2400L) {
-            cap("April and June can wait — that's fine.")
-            highlight(1); highlight(3)
-            showSnackbarSticky("Hid 2 months. Not deleted — still in your gallery.")
-        }
-        step(3400L) {
-            cap("Whenever you come back — tomorrow, next week, next month…")
-            hideSnackbar()
-            binding.tvYear.animate().alpha(0.15f).setDuration(500).start()
-            binding.demoStack.animate().alpha(0.15f).setDuration(500).start()
-        }
-        step(2600L) {
-            renderReturn()
-            cap("March and May stay hidden. You pick up where you left off — plus what's new.")
-            binding.tvYear.animate().alpha(1f).setDuration(500).start()
-            binding.demoStack.alpha = 0f
-            binding.demoStack.animate().alpha(1f).setDuration(500).start()
-        }
-        step(3200L) {
-            binding.tvCaption.setTextColor(ContextCompat.getColor(this, R.color.check_green))
-            cap("Curate once. Stays curated.")
-        }
-        return steps
-    }
-
-    private fun tick() {
-        if (!playing || stepIndex >= steps.size) {
-            val finished = stepIndex >= steps.size
-            playing = false
-            if (finished) onDemoComplete()
-            return
-        }
-        val (wait, action) = steps[stepIndex]
-        action()
-        stepIndex++
-        handler.postDelayed({ tick() }, wait)
-    }
-
-    /** The timeline reached the end. In mandatory mode, reveal the close ✕ (or opt out + close). */
-    private fun onDemoComplete() {
+    private fun onDone() {
         demoCompleted = true
-        showSummary()
-        if (replay) return
-        if (binding.cbDontShowAgain.isChecked) optOutAndFinish()
-        else binding.btnCloseDemo.visibility = View.VISIBLE
+        if (replay) { finish(); return }
+        if (binding.cbDontShowAgain.isChecked) optOutAndFinish() else finish()
     }
 
     private fun optOutAndFinish() {
         prefs.setDemoDisabled()
-        // Persist the opt-out durably so it survives uninstall/reinstall (SharedPreferences doesn't).
-        // HomeActivity re-applies it on the next fresh install. Off the main thread (MediaStore/file).
         val app = applicationContext
         Thread { OnboardingMarker.write(app) }.start()
         finish()
     }
 
-    private fun play() {
-        if (playing || stepIndex >= steps.size) return
-        playing = true
-        tick()
-    }
+    // ── Slide rendering ──────────────────────────────────────────────────────
 
-    private fun pause() {
-        playing = false
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun color(res: Int) = ContextCompat.getColor(this, res)
+
+    private fun renderSlide() {
         handler.removeCallbacksAndMessages(null)
+        binding.tapFinger.animate().cancel()
+        binding.tapFinger.apply { visibility = View.INVISIBLE; alpha = 0f; translationX = 0f; translationY = 0f }
+        binding.slideContainer.removeAllViews()
+        reviewShelf = null; reviewShelfNames = null; reviewReassure = null
+
+        val last = slideIndex == TOTAL_SLIDES - 1
+        if (last) demoCompleted = true
+        updateDots()
+        binding.btnBack.visibility = if (slideIndex == 0) View.INVISIBLE else View.VISIBLE
+        binding.btnNext.text = if (last) "Done" else "Next"
+        binding.cbDontShowAgain.visibility = if (!replay && last) View.VISIBLE else View.GONE
+
+        when (slideIndex) {
+            0 -> slideBacklog()
+            1 -> slideReview()
+            2 -> slideReturn()
+            else -> slideRecap()
+        }
     }
 
-    private fun rewind() {
-        binding.tvCaption.setTextColor(ContextCompat.getColor(this, R.color.on_surface_variant))
-        renderInitial()
+    private fun buildDots() {
+        binding.dots.removeAllViews(); dotViews.clear()
+        for (i in 0 until TOTAL_SLIDES) {
+            val d = View(this).apply {
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color(R.color.surface_variant)) }
+                layoutParams = LinearLayout.LayoutParams(dp(6), dp(6)).apply { marginStart = if (i == 0) 0 else dp(6) }
+            }
+            dotViews.add(d); binding.dots.addView(d)
+        }
+    }
+
+    private fun updateDots() = dotViews.forEachIndexed { i, d ->
+        (d.background as GradientDrawable).setColor(color(if (i == slideIndex) R.color.primary else R.color.surface_variant))
+    }
+
+    // ── View builders ────────────────────────────────────────────────────────
+
+    private fun addTo(v: View, topMargin: Int = 0) {
+        v.layoutParams = (v.layoutParams as? LinearLayout.LayoutParams
+            ?: LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            .apply { if (topMargin != 0) this.topMargin = topMargin }
+        binding.slideContainer.addView(v)
+    }
+
+    private fun heading(text: String, sizeSp: Float, colorRes: Int, bold: Boolean, topMargin: Int = 0): TextView {
+        val t = TextView(this).apply {
+            this.text = text; textSize = sizeSp; setTextColor(color(colorRes))
+            if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        addTo(t, topMargin); return t
+    }
+
+    private fun addYear() {
+        val y = TextView(this).apply {
+            text = "2024"; textSize = 13f; setTextColor(color(R.color.on_surface_variant))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        addTo(y, dp(6))
+    }
+
+    private fun cardBg(): GradientDrawable = GradientDrawable().apply {
+        cornerRadius = dp(10).toFloat()
+        setColor(color(R.color.surface))
+        setStroke(dp(1), color(R.color.surface_variant))
+    }
+
+    private fun addMonthCard(name: String, isNew: Boolean = false): LinearLayout {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = cardBg(); setPadding(dp(11), dp(10), dp(11), dp(10))
+        }
+        val arrow = TextView(this).apply { text = "▸"; textSize = 12f; setTextColor(color(R.color.on_surface_variant)) }
+        val title = TextView(this).apply {
+            text = name; textSize = 13f; setTextColor(color(R.color.on_surface))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) }
+        }
+        card.addView(arrow); card.addView(title)
+        if (isNew) card.addView(pill("new", R.color.background, R.color.primary, outline = true))
+        addTo(card, dp(7)); return card
+    }
+
+    private fun pill(text: String, bgRes: Int, textRes: Int, outline: Boolean = false): TextView = TextView(this).apply {
+        this.text = text; textSize = 11f; setTextColor(color(textRes))
+        setPadding(dp(10), dp(4), dp(10), dp(4))
+        background = GradientDrawable().apply {
+            cornerRadius = dp(20).toFloat()
+            if (outline) setStroke(dp(1), color(textRes)) else setColor(color(bgRes))
+        }
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            .apply { marginStart = dp(5) }
+    }
+
+    /** Dashed "Hidden · <names>" shelf — where hidden months are filed (named, so nothing looks back). */
+    private fun addShelf(names: String, visible: Boolean = true): Pair<LinearLayout, TextView> {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(11), dp(9), dp(11), dp(9))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat(); setColor(color(R.color.surface))
+                setStroke(dp(1), color(R.color.on_surface_variant), dp(5).toFloat(), dp(4).toFloat())
+            }
+            visibility = if (visible) View.VISIBLE else View.GONE
+        }
+        val label = TextView(this).apply {
+            text = "🙈  Hidden"; textSize = 12f; setTextColor(color(R.color.on_surface_variant)); }
+        val nm = TextView(this).apply {
+            text = names; textSize = 12f; setTextColor(color(R.color.on_surface))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) }
+        }
+        row.addView(label); row.addView(nm)
+        addTo(row, 0); return row to nm
+    }
+
+    private fun addReassure(): View {
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(11), dp(10), dp(11), dp(10))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(9).toFloat(); setColor(color(R.color.surface)); setStroke(dp(1), color(R.color.check_green))
+            }
+            alpha = 0f; visibility = View.GONE
+        }
+        bar.addView(TextView(this).apply {
+            text = "Hidden only in this app — never deleted, still in your gallery."
+            textSize = 12f; setTextColor(color(R.color.on_surface)); setLineSpacing(dp(1).toFloat(), 1f)
+        })
+        addTo(bar, dp(10)); return bar
+    }
+
+    private fun buildTile(seed: Int, i: Int): FrameLayout {
+        val emoji = TextView(this).apply {
+            text = TILE_EMOJI[(seed * 2 + i) % TILE_EMOJI.size]; gravity = Gravity.CENTER; textSize = 15f
+            background = GradientDrawable().apply { cornerRadius = dp(3).toFloat(); setColor(TILE_COLORS[(seed + i) % TILE_COLORS.size]) }
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        val scrim = View(this).apply {
+            background = GradientDrawable().apply { cornerRadius = dp(3).toFloat(); setColor(0x77B3261E.toInt()) }
+            visibility = View.GONE
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        val badge = TextView(this).apply {
+            text = "✓"; gravity = Gravity.CENTER; textSize = 9f; setTextColor(Color.WHITE)
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color(R.color.delete_red)); setStroke(dp(1), Color.WHITE) }
+            visibility = View.GONE
+            val b = dp(15); layoutParams = FrameLayout.LayoutParams(b, b, Gravity.TOP or Gravity.END)
+        }
+        return FrameLayout(this).apply {
+            layoutParams = GridLayout.LayoutParams().apply { width = dp(34); height = dp(34); setMargins(dp(2), dp(2), dp(2), dp(2)) }
+            addView(emoji); addView(scrim); addView(badge)
+        }
+    }
+
+    // ── Slides ───────────────────────────────────────────────────────────────
+
+    private fun slideBacklog() {
+        heading("Months piling up", 18f, R.color.on_surface, bold = true, topMargin = dp(2))
+        heading("Years of photos, waiting to be sorted.", 13f, R.color.on_surface_variant, bold = false, topMargin = dp(6))
+        addYear()
+        val cards = listOf(addMonthCard("March"), addMonthCard("April"), addMonthCard("May"))
+        cards.forEachIndexed { i, c -> c.alpha = 0f; c.translationY = dp(6).toFloat()
+            c.animate().alpha(1f).translationY(0f).setStartDelay((150L * i)).setDuration(400).start() }
+    }
+
+    private fun slideReview() {
+        heading("Review, then hide", 18f, R.color.on_surface, bold = true, topMargin = dp(2))
+        heading("Open a month, delete the junk, then hide it — any month, in any order.", 13f, R.color.on_surface_variant, bold = false, topMargin = dp(6))
+        addYear()
+
+        val (shelf, shelfNames) = addShelf("", visible = false)
+        reviewShelf = shelf; reviewShelfNames = shelfNames
+
+        // March, opened, with tiles + Delete (hidden) / Hide month (shown) pills.
+        val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = cardBg(); setPadding(dp(11), dp(9), dp(11), dp(10)) }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        row.addView(TextView(this).apply { text = "▾"; textSize = 12f; setTextColor(color(R.color.on_surface_variant)) })
+        row.addView(TextView(this).apply {
+            text = "March"; textSize = 13f; setTextColor(color(R.color.on_surface)); setTypeface(typeface, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) }
+        })
+        val delPill = pill("Delete", R.color.delete_red, android.R.color.white).apply { alpha = 0f; visibility = View.INVISIBLE }
+        val hidePill = pill("Hide month", R.color.primary, R.color.on_primary)
+        row.addView(delPill); row.addView(hidePill)
+        card.addView(row)
+        val grid = GridLayout(this).apply {
+            columnCount = 6; layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(9) }
+        }
+        val tiles = ArrayList<FrameLayout>()
+        for (i in 0 until 6) { val t = buildTile(0, i); tiles.add(t); grid.addView(t) }
+        card.addView(grid)
+        addTo(card, dp(7))
+
+        addMonthCard("April"); addMonthCard("May")
+        reviewReassure = addReassure()
+
+        binding.slideContainer.post { runReviewSequence(card, tiles, delPill, hidePill) }
+    }
+
+    private fun slideReturn() {
+        heading("It remembers so you don't have to", 18f, R.color.on_surface, bold = true, topMargin = dp(2))
+        heading("Come back tomorrow or next month — March stays hidden. You pick up exactly where you left off, plus what's new.",
+            13f, R.color.on_surface_variant, bold = false, topMargin = dp(6))
+        addYear()
+        addShelf("March")
+        addMonthCard("April"); addMonthCard("May")
+        val july = addMonthCard("July", isNew = true)
+        july.alpha = 0f; july.translationY = dp(6).toFloat()
+        july.animate().alpha(1f).translationY(0f).setStartDelay(250).setDuration(400).start()
+    }
+
+    private fun slideRecap() {
+        heading("Curate once. Stays curated.", 19f, R.color.check_green, bold = true, topMargin = dp(2))
+        heading(
+            "• Curate any month, in any order.\n" +
+            "• Hidden only in this app — never deleted, filed away and reopenable.\n" +
+            "• Come back later — it stays hidden.\n" +
+            "• You move on to what's new, making real progress.",
+            16f, R.color.on_surface, bold = false, topMargin = dp(14)
+        ).apply { setLineSpacing(dp(6).toFloat(), 1f) }
+    }
+
+    // ── The one animated slide: finger → delete → hide → tuck into Hidden ─────
+
+    private fun runReviewSequence(card: View, tiles: List<FrameLayout>, delPill: TextView, hidePill: TextView) {
+        val finger = binding.tapFinger
+        finger.animate().cancel()
+        finger.translationX = 0f; finger.translationY = 0f; finger.alpha = 0f; finger.visibility = View.VISIBLE
+        val fHome = IntArray(2); finger.getLocationOnScreen(fHome)
+
+        fun moveTap(target: View, onTap: () -> Unit, next: () -> Unit) {
+            val t = IntArray(2); target.getLocationOnScreen(t)
+            val dx = (t[0] + target.width / 2f) - (fHome[0] + finger.width / 2f)
+            val dy = (t[1] + target.height / 2f) - fHome[1].toFloat() - dp(4)
+            finger.animate().alpha(1f).translationX(dx).translationY(dy).setDuration(760)
+                .withEndAction {
+                    finger.animate().scaleX(0.78f).scaleY(0.78f).setDuration(170).withEndAction {
+                        onTap()
+                        finger.animate().scaleX(1f).scaleY(1f).setDuration(170)
+                            .withEndAction { handler.postDelayed({ next() }, 340) }.start()
+                    }.start()
+                }.start()
+        }
+
+        moveTap(tiles[1], { selectTile(tiles[1]); showPill(delPill) }, {
+            moveTap(tiles[4], { selectTile(tiles[4]) }, {
+                moveTap(delPill, { deleteTile(tiles[1]); deleteTile(tiles[4]); delPill.visibility = View.GONE }, {
+                    handler.postDelayed({
+                        moveTap(hidePill, {
+                            collapse(card)
+                            finger.animate().alpha(0f).setDuration(250).withEndAction { finger.visibility = View.INVISIBLE }.start()
+                            revealHidden()
+                        }, {})
+                    }, 520)
+                })
+            })
+        })
+    }
+
+    private fun selectTile(frame: FrameLayout) {
+        frame.animate().scaleX(0.9f).scaleY(0.9f).setDuration(150).start()
+        frame.getChildAt(1)?.apply { alpha = 0f; visibility = View.VISIBLE; animate().alpha(1f).setDuration(160).start() }
+        frame.getChildAt(2)?.apply {
+            scaleX = 0f; scaleY = 0f; visibility = View.VISIBLE
+            animate().scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(OvershootInterpolator()).start()
+        }
+    }
+
+    private fun deleteTile(frame: FrameLayout) {
+        frame.animate().alpha(0f).scaleX(0.1f).scaleY(0.1f).setStartDelay(150).setDuration(400).start()
+    }
+
+    private fun showPill(p: TextView) {
+        p.alpha = 0f; p.visibility = View.VISIBLE; p.animate().alpha(1f).setDuration(220).start()
+    }
+
+    private fun collapse(card: View) {
+        val start = card.height
+        if (start == 0) { card.visibility = View.GONE; return }
+        ValueAnimator.ofInt(start, 0).apply {
+            duration = 550
+            addUpdateListener { a ->
+                val lp = card.layoutParams; lp.height = a.animatedValue as Int; card.layoutParams = lp
+                card.alpha = (a.animatedValue as Int).toFloat() / start
+            }
+            start()
+        }
+    }
+
+    private fun revealHidden() {
+        reviewShelfNames?.text = "March"
+        reviewShelf?.apply { visibility = View.VISIBLE; alpha = 0f; animate().alpha(1f).setDuration(350).start() }
+        handler.postDelayed({
+            reviewReassure?.apply { visibility = View.VISIBLE; animate().alpha(1f).setDuration(400).start() }
+        }, 450)
     }
 }

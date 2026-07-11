@@ -643,70 +643,71 @@ Find duplicates, Search, Select & act, Stats anywhere, Private by design. Footer
 
 ---
 
-## 13. FIRST-RUN ANIMATION (onboarding explainer)
+## 13. FIRST-RUN EXPLAINER (self-paced onboarding deck)
 
-A full-screen animated explainer that teaches the core Hide-month loop.
+A self-paced slide deck that teaches the core Hide-month loop: the viewer taps **Next / Back** through
+the slides, so nothing races off-screen. Only the one action slide animates; the rest are calm states
+the reader dwells on as long as they like.
 
-**When it shows — mandatory until opted out.** On **every app launch** (cold start, once per
-process) the demo auto-plays — but **after** Home's access prompts (media + All-files) **and** after
-the "Restore your progress?" offer has been shown/resolved, so a returning user's restore prompt is
-never buried behind the demo. It is **mandatory**: no transport controls, Back is blocked, and it
-must play through to the end. This repeats on every launch **until the user opts out**.
+**When it shows — mandatory until opted out.** On **every app launch** (cold start, once per process)
+the deck opens — but **after** Home's access prompts (media + All-files) **and** after the "Restore
+your progress?" offer has been shown/resolved, so a returning user's restore prompt is never buried
+behind it. It is **mandatory**: the viewer must tap through to the **last slide** before it can be
+dismissed (Back steps within the deck; system Back steps back a slide, and at slide 0 it's blocked).
+Repeats on every launch **until the user opts out**.
 
-**Opting out.** In place of the old "Get started" button, the bottom shows a **"Don't show again"**
-checkbox. A **✕** (top-right) appears only when the demo finishes. At completion:
-- if "Don't show again" is ticked → the window closes itself and the demo never auto-shows again;
-- otherwise → the ✕ lets the user close it (and it auto-shows again next launch).
+**Opting out.** On the **last slide** a **"Don't show again"** checkbox appears; ticking it closes the
+deck and it never auto-shows again. Otherwise the primary button reads **"Done"** and closes it (it
+auto-shows again next launch).
 
 State is a prefs flag (`demo opted out`), mirrored by a **durable marker file in Downloads** so the
 opt-out **survives uninstall/reinstall** (SharedPreferences alone is wiped on reinstall). On a fresh
 install Home reads that marker (via the same All-files access used for progress-restore) and
 re-applies the opt-out. A user who **never** opted out still sees the demo again after a reinstall.
 Also **replayable** any time from Help's "Watch how curating works" button — replay mode is *not*
-mandatory (Rewind/Play/Pause + ✕ always available, no checkbox).
+mandatory (a ✕ closes it anytime, no checkbox).
 
 ▶ **iOS note:** the durable opt-out maps to iCloud key-value / a Documents marker; there's no
 `MANAGE_EXTERNAL_STORAGE` equivalent, so persistence rides on the same store as the progress backup.
 
 ### Layout
-- Title **"How curating works"** + subtitle ("Review a month, hide it, and it steps out of your
-  way — so you never scroll past the same photos again").
-- A faux phone-screen surface containing:
-  - A **progress bar** with a **"{N}% curated"** label to its right (starts "0% curated").
-  - A **caption** line (updates per step).
-  - A **stack of month cards** (March / April / June 2024). Each card has a ▸/▾ arrow + month
-    label + a (hidden) **"Hide month"** pill, and a collapsible grid of **colored tiles, each
-    showing a small picture/emoji** (so it reads as varied content, not blank boxes).
-- Transport controls: **Rewind / Play / Pause**. A primary button reads **"Get started"** on
-  first run, **"Done"** in replay. **Auto-plays on open** (both modes).
+- Title **"How curating works"** + subtitle ("Tap through at your own pace — review a month, hide it,
+  and it steps out of your way").
+- A faux phone-screen surface with **progress dots** (one per slide) at the top and the current
+  slide's content below.
+- Bottom nav: **Back** (hidden on slide 0) · **Next** (reads **"Done"** on the last slide). The
+  "Don't show again" checkbox appears only on the last slide (mandatory mode).
 
-### Animation sequence (paced ~1.5–2.4 s per beat)
-1. All three months **collapsed** (headers only) — "Here are your months, waiting to be reviewed."
-   The **middle** month is opened first, then the two ends in random order (so it never runs
-   strictly top→bottom or bottom→top; all three are always opened).
-2. **Open** the first month — the finger taps its header, tiles slide down, card highlights —
-   "Open one and look through its photos."
-3. **Delete a few tiles like the real app**: the counts **{1, 2, 3}** are spread across the three
-   months (which month gets which is random each run), at **random positions** — selected with a
-   **red wash + a white ✓ badge** on each — and a red **"🗑 Delete"** button appears — "Pick the
-   ones you don't want and Delete." Then the tiles are removed and a floating **"Deleted N photos
-   you didn't want to keep"** confirmation pops up. This is deliberate: it shows curation is
-   *prune, then hide*, not just hide.
-4. Show its **Hide month** pill — "Then hide the whole month."
-5. Card **collapses away**; progress → **34% curated** — "It steps out of your way — this app gets cleaner."
-6. Open month 2 → **delete some** → pill → collapse; progress → **67%** ("Next month — delete the junk… then hide it").
-7. Open month 3 → **delete some** → pill → collapse; progress → **100%**.
-8. End state: full bar, **"100% curated"**, caption "All caught up — clean and curated." (green).
+### Slides
+0. **Backlog** — a single **"2024"** header + three collapsed month cards (March / April / May),
+   fading in. *"Months piling up · Years of photos, waiting to be sorted."*
+1. **Review, then hide** *(the one animated slide)* — March opens with a grid of emoji "photo" tiles,
+   a **Delete** pill (hidden) and a **Hide month** pill (shown from the start, so its presence
+   registers). A golden **👆 finger** taps two junk tiles (each gets a red ring + ✓ badge → **Delete**
+   fades in), taps **Delete** (tiles pop out), then taps **Hide month** → March **collapses and tucks
+   into a dashed "🙈 Hidden · March" shelf** at the top. A green reassurance bar then fades in below:
+   *"Hidden only in this app — never deleted, still in your gallery."* Plays on entry; re-plays if you
+   Back into it.
+2. **It remembers so you don't have to** — the **"🙈 Hidden · March"** shelf **persists** (so the
+   hidden month stays visibly filed *by name* — never looks resurrected), while the active list is
+   April, May + a new **July** (badged "new"). *"Come back tomorrow or next month — March stays hidden.
+   You pick up exactly where you left off, plus what's new."*
+3. **Recap** — **"Curate once. Stays curated."** (green) + four bullets: *curate any month in any order
+   · hidden only in this app, never deleted, filed away and reopenable · come back later, it stays
+   hidden · you move on to what's new, making real progress.* Carries **Done** + "Don't show again".
 
-A floating **finger** (👆) drives everything: it **taps each month's header to open it**, **taps
-each photo to select it** (the check
-pops on tap, the Delete button appears after the first), then taps **Delete**, then taps **Hide
-month** — synced with each button's own press — so the interaction reads as real taps.
+**Why a deck, not a timed movie.** The persistence payoff is the novel idea and can't be shown in one
+continuous animation (there's no "later" in it). Self-pacing kills the "messages fly off the screen"
+problem, gives the reader control (Back = pause/replay for free), and the static recap is the real
+comprehension surface. Only **one** month is curated on-screen — any others appearing hidden without a
+shown action reads as "did the app delete that?"; *"any order / as many as you like"* lives in the copy.
+The **Hidden shelf** names filed months so the return slide never reads as Frankenstein (unfamiliar
+months looking like the hidden ones clawing back).
 
-Rewind resets to the all-collapsed 0% state (paused). Pause halts between beats; Play resumes.
-
-▶ **iOS note:** reproduce as a native animated view (e.g. SwiftUI timeline / `withAnimation`),
-auto-playing on first run with the same Rewind/Play/Pause + replay-from-Help affordances.
+▶ **iOS note:** reproduce as a native paged view (SwiftUI `TabView(.page)` or a manual Next/Back
+stepper) with the same mandatory-until-last + replay-from-Help behavior and the same Hidden-shelf
+device. The durable opt-out maps to iCloud key-value / a Documents marker (no
+`MANAGE_EXTERNAL_STORAGE` equivalent).
 
 ---
 
