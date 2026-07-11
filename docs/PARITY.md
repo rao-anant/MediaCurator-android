@@ -50,7 +50,8 @@ It's direction-agnostic — works whether Android is handing off to iOS or vice-
 | Deleted photos leave the place-search grid | §7 | DONE a28 | DONE b12 | iOS: PlaceBrowse now excludes the staged-for-deletion set from media/records/photos, and keeps the open city across the refresh |
 | First-run place intro banner | §7 | DONE a27 | DONE b13 | one-time; `place_intro_shown`, dismissible ✕ banner in PlaceBrowseView |
 | Place-search accuracy note (Settings) | §7 | DONE a27 | DONE b13 | "approximate / only located photos" in the Settings place-search footer |
-| Reinstall-safe place index | §7 | DONE a27 | TODO | gzipped Downloads mirror, remap by name+size |
+| Reinstall-safe durable state (hidden months, curation flags, cleaned-up totals) | §4, §7 | DONE a27 | DONE b14 | iOS: keychain (survives uninstall on the same device, no iCloud entitlement); Android: gzipped Downloads mirror |
+| Reinstall-safe place index | §7 | DONE a27 | N/A | iOS deliberately re-scans the place index from EXIF on reinstall (privacy + avoids iCloud quota) — only the small durable state above is backed up |
 | Exact-place fast path + warm-up | §7 | DONE a27 | TODO | `placeExact` lookup |
 | Act-on-results / unified icon action bar | §3, §7 | DONE a27 | TODO | Share/Rename/Switch Album/Show-in-gallery/Delete; single vs multi rule |
 | "By Country" browse (was "Drill down") | §7 | DONE a26 | DONE b7 | naming only |
