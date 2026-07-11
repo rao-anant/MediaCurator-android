@@ -326,7 +326,7 @@ class OnboardingActivity : AppCompatActivity() {
 
     private fun slideReturn() {
         heading("It remembers so you don't have to", 18f, R.color.on_surface, bold = true, topMargin = dp(2))
-        heading("Come back tomorrow or next month — March stays hidden. You pick up exactly where you left off, plus what's new.",
+        heading("Come back tomorrow or next month — March stays hidden, and what's new is waiting.",
             13f, R.color.on_surface_variant, bold = false, topMargin = dp(6))
         addYear()
         addShelf("March")
@@ -342,7 +342,7 @@ class OnboardingActivity : AppCompatActivity() {
             "• Curate any month, in any order.\n" +
             "• Hidden only in this app — never deleted, filed away and reopenable.\n" +
             "• Come back later — it stays hidden.\n" +
-            "• You move on to what's new, making real progress.",
+            "• You pick up exactly where you left off, plus what's new.",
             16f, R.color.on_surface, bold = false, topMargin = dp(14)
         ).apply { setLineSpacing(dp(6).toFloat(), 1f) }
     }

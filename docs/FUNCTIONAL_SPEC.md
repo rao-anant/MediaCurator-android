@@ -690,11 +690,11 @@ mandatory (a ✕ closes it anytime, no checkbox).
    Back into it.
 2. **It remembers so you don't have to** — the **"🙈 Hidden · March"** shelf **persists** (so the
    hidden month stays visibly filed *by name* — never looks resurrected), while the active list is
-   April, May + a new **July** (badged "new"). *"Come back tomorrow or next month — March stays hidden.
-   You pick up exactly where you left off, plus what's new."*
+   April, May + a new **July** (badged "new"). *"Come back tomorrow or next month — March stays hidden,
+   and what's new is waiting."*
 3. **Recap** — **"Curate once. Stays curated."** (green) + four bullets: *curate any month in any order
    · hidden only in this app, never deleted, filed away and reopenable · come back later, it stays
-   hidden · you move on to what's new, making real progress.* Carries **Done** + "Don't show again".
+   hidden · you pick up exactly where you left off, plus what's new.* Carries **Done** + "Don't show again".
 
 **Why a deck, not a timed movie.** The persistence payoff is the novel idea and can't be shown in one
 continuous animation (there's no "later" in it). Self-pacing kills the "messages fly off the screen"
