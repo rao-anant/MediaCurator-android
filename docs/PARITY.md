@@ -24,6 +24,7 @@ richer narrative in its own `PORTING_NOTES.md`; keep the two consistent (this ta
 
 | Feature | Spec § | Android | iOS | Origin / notes |
 |---|---|---|---|---|
+| Deleted photos leave the place-search grid | §7 | ✅ a28 | ⬜ | session-delete guard; re-query can briefly resurrect trashed items |
 | First-run place intro banner | §7 | ✅ a27 | ⬜ | one-time; `place_intro_shown` |
 | Place-search accuracy note (Settings) | §7 | ✅ a27 | ⬜ | "approximate / only located photos" |
 | Reinstall-safe place index | §7 | ✅ a27 | ⬜ | gzipped Downloads mirror, remap by name+size |

@@ -31,6 +31,11 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
     private var placeExact: Map<String, List<MediaItem>> = emptyMap()
     private var ready = false
 
+    // Ids deleted this session. A freshly-trashed item can still come back from a MediaStore re-query
+    // for a moment, so we filter these out of every result/count until the VM is recreated — same
+    // idea as the gallery's session-delete guard, so deletes actually leave the screen.
+    private val sessionDeletedIds = HashSet<Long>()
+
     private var searchJob: Job? = null
 
     private val _results = MutableLiveData<List<GalleryItem.Media>?>(null)
@@ -44,6 +49,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         if (!prefs.isPlaceSearchEnabled()) { _placeRecords.postValue(emptyList()); return }
         viewModelScope.launch(Dispatchers.IO) {
             val liveIds = MediaCache.get(repo).mapTo(HashSet()) { it.id }   // only count photos that still exist
+            liveIds.removeAll(sessionDeletedIds)                            // …and not the just-deleted ones
             val store = PlaceStore.getInstance(getApplication<android.app.Application>()).also { it.ensureLoaded() }
             _placeRecords.postValue(store.records(liveIds))
         }
@@ -61,7 +67,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
                 // Fast path: an exact place name (chip tap / breadcrumb) is a direct lookup —
                 // no need to fuzzy-scan the whole library to re-derive "photos in this place".
                 val exact = placeExact[SearchEngine.norm(query.trim())]
-                if (exact != null) {
+                val base = if (exact != null) {
                     exact.distinctBy { it.id }
                         .sortedByDescending { it.dateTaken }
                         .mapIndexed { i, item -> GalleryItem.Media(item, "", i, null, 0) }
@@ -70,6 +76,9 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
                         GalleryItem.Media(r.item, "", i, r.matchReason.ifBlank { null }, 0)
                     }
                 }
+                // Never resurrect a just-deleted item (MediaStore may still return it briefly).
+                if (sessionDeletedIds.isEmpty()) base
+                else base.filter { it.mediaItem.id !in sessionDeletedIds }
             }
             _results.postValue(res)
         }
@@ -87,6 +96,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteMedia(items: List<MediaItem>) {
         if (items.isEmpty()) return
         val ids = items.mapTo(HashSet()) { it.id }
+        sessionDeletedIds.addAll(ids)                                                            // keep them gone
         _results.value?.let { cur -> _results.value = cur.filter { it.mediaItem.id !in ids } }  // instant feedback
         viewModelScope.launch(Dispatchers.IO) {
             try {
