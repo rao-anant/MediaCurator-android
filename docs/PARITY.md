@@ -46,6 +46,7 @@ It's direction-agnostic — works whether Android is handing off to iOS or vice-
 
 | Feature | Spec § | Android | iOS | Origin / notes |
 |---|---|---|---|---|
+| Selection bar must not hide bottom photos | §3, §7 | DONE a29 | ? | Android: bar was an overlay covering the last grid row; made it a sibling below the grid so results shrink. iOS: confirm the multi-select bar doesn't occlude the last row |
 | Deleted photos leave the place-search grid | §7 | DONE a28 | DONE b12 | iOS: PlaceBrowse now excludes the staged-for-deletion set from media/records/photos, and keeps the open city across the refresh |
 | First-run place intro banner | §7 | DONE a27 | TODO | one-time; `place_intro_shown` |
 | Place-search accuracy note (Settings) | §7 | DONE a27 | TODO | "approximate / only located photos" |

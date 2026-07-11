@@ -184,13 +184,14 @@
             android:textColor="@color/on_surface_variant"
             android:textSize="15sp"
             android:text="Search file names\nand text inside PDFs" />
+    </FrameLayout>
 
-        <!-- Multi-select action bar — appears when results are long-pressed to act on photos. -->
-        <LinearLayout
+    <!-- Multi-select action bar — a sibling BELOW the grid (not an overlay), so when it appears the
+         weighted results area shrinks and the bottom row is never hidden behind it. -->
+    <LinearLayout
             android:id="@+id/selectionBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="bottom"
             android:orientation="vertical"
             android:background="@color/selection_bar"
             android:padding="12dp"
@@ -264,5 +265,4 @@
                     android:tooltipText="Delete" />
             </LinearLayout>
         </LinearLayout>
-    </FrameLayout>
 </LinearLayout>
