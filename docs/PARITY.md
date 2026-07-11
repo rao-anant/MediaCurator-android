@@ -20,6 +20,27 @@ richer narrative in its own `PORTING_NOTES.md`; keep the two consistent (this ta
 **Legend:** ✅ done (with build) · 🚧 partial / in progress · ⬜ not started · N/A not applicable ·
 `?` unknown — the owning side should confirm.
 
+## Handoff message — paste to the other Claude
+
+When the *other* platform's Claude starts a session, paste the block below (fill in the last blank).
+It's direction-agnostic — works whether Android is handing off to iOS or vice-versa.
+
+> We coordinate cross-platform work through a shared parity ledger in the **MediaCurator-android** repo
+> at `docs/PARITY.md` (from the iOS repo it's likely `../MediaCurator/docs/PARITY.md`). Clone that repo
+> alongside yours so you can read and edit it.
+>
+> 1. Add a startup hook to your repo's `CLAUDE.md`: "On startup, read PARITY.md. Rows where my
+>    platform's cell is ⬜ / 🚧 / ? are my backlog. When I ship a generic feature/fix, I flip my cell to
+>    ✅ with a build stamp (Android: `a<versionCode>`; iOS: `b<build>` or a date), in the **same commit**
+>    as the code."
+> 2. Reconcile any `?` cells for your platform against your own porting notes.
+> 3. Your backlog = every row where your column is ⬜ or 🚧. Work them, then flip the cell.
+> 4. When you find an issue, or build something generic the other platform will need, **add/refresh its
+>    row** so the other Claude picks it up.
+> 5. Specific hand-off right now: ______________________________________________
+>    (e.g. "In place-search, deleting photos must make them leave the grid and not resurface — Android
+>    fixed it with a session-delete guard; check whether your platform has the same bug.")
+
 ## v1.1 — Place search & recent work
 
 | Feature | Spec § | Android | iOS | Origin / notes |
