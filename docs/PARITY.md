@@ -46,10 +46,10 @@ It's direction-agnostic — works whether Android is handing off to iOS or vice-
 
 | Feature | Spec § | Android | iOS | Origin / notes |
 |---|---|---|---|---|
-| Selection bar must not hide bottom photos | §3, §7 | DONE a29 | ? | Android: bar was an overlay covering the last grid row; made it a sibling below the grid so results shrink. iOS: confirm the multi-select bar doesn't occlude the last row |
+| Selection bar must not hide bottom photos | §3, §7 | DONE a29 | DONE b13 | iOS: place/hidden grid already used safeAreaInset; moved the gallery multi-select bar from a bottom overlay to safeAreaInset so it insets the grid instead of occluding the last row |
 | Deleted photos leave the place-search grid | §7 | DONE a28 | DONE b12 | iOS: PlaceBrowse now excludes the staged-for-deletion set from media/records/photos, and keeps the open city across the refresh |
-| First-run place intro banner | §7 | DONE a27 | TODO | one-time; `place_intro_shown` |
-| Place-search accuracy note (Settings) | §7 | DONE a27 | TODO | "approximate / only located photos" |
+| First-run place intro banner | §7 | DONE a27 | DONE b13 | one-time; `place_intro_shown`, dismissible ✕ banner in PlaceBrowseView |
+| Place-search accuracy note (Settings) | §7 | DONE a27 | DONE b13 | "approximate / only located photos" in the Settings place-search footer |
 | Reinstall-safe place index | §7 | DONE a27 | TODO | gzipped Downloads mirror, remap by name+size |
 | Exact-place fast path + warm-up | §7 | DONE a27 | TODO | `placeExact` lookup |
 | Act-on-results / unified icon action bar | §3, §7 | DONE a27 | TODO | Share/Rename/Switch Album/Show-in-gallery/Delete; single vs multi rule |
