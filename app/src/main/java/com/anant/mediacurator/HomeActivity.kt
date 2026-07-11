@@ -221,12 +221,7 @@ class HomeActivity : AppCompatActivity() {
 
     /** Play the mandatory demo once per launch, unless the user opted out. */
     private fun showDemoIfNeeded() {
-        // TEMP(demo-test): force the demo every launch, ignoring the opt-out, so the mandatory
-        // first-run can be tested on-device without clearing app data (which would wipe hidden
-        // months). REMOVE this override before merging/pushing to main — restore the plain
-        // `!prefs.isDemoDisabled()` condition below.
-        val forceDemoForTesting = true
-        if (!demoShownThisLaunch && (forceDemoForTesting || !prefs.isDemoDisabled())) {
+        if (!demoShownThisLaunch && !prefs.isDemoDisabled()) {
             demoShownThisLaunch = true
             demoLauncher.launch(Intent(this, OnboardingActivity::class.java))
         }
