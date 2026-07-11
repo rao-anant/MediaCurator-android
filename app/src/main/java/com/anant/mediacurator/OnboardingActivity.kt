@@ -67,7 +67,7 @@ class OnboardingActivity : AppCompatActivity() {
     private var stepIndex = 0
     private var playing = false
 
-    private val months = listOf("March 2024" to 9, "April 2024" to 6, "June 2024" to 8)
+    private val months = listOf("March" to 9, "April" to 6, "May" to 8, "June" to 5)
     private lateinit var steps: List<Pair<Long, () -> Unit>>
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -124,21 +124,23 @@ class OnboardingActivity : AppCompatActivity() {
         stepIndex = 0
         demos.clear()
         binding.demoStack.removeAllViews()
-        binding.pbCurated.setProgressCompat(0, false)
-        binding.tvPct.text = "0% curated"
+        binding.demoStack.alpha = 1f
+        binding.demoStack.visibility = View.VISIBLE
+        binding.tvYear.visibility = View.VISIBLE
+        binding.tvYear.alpha = 1f
+        binding.tvCaption.visibility = View.VISIBLE
+        binding.summaryBox.visibility = View.GONE
         binding.tvDeletedToast.animate().cancel()
         binding.tvDeletedToast.visibility = View.GONE
         binding.tapFinger.animate().cancel()
         binding.tapFinger.visibility = View.INVISIBLE
+        binding.tvCaption.setTextColor(ContextCompat.getColor(this, R.color.on_surface_variant))
         binding.tvCaption.text = "Press play to see how curating works."
 
-        // Guarantee one month deletes 1, another 2, another 3 — but which month gets which count is
-        // random each run. Positions within a month are randomised too (see buildCard).
-        val delCounts = listOf(1, 2, 3).shuffled()
         months.forEachIndexed { idx, (label, count) ->
-            demos.add(buildCard(label, count, idx * 3, delCounts.getOrElse(idx) { 1 }))
+            demos.add(buildCard(label, count, idx * 3, 2))
         }
-        // Rebuild the timeline too, so the open-order re-shuffles on each replay.
+        // Rebuild the timeline so a replay starts clean.
         steps = buildSteps()
     }
 
@@ -150,7 +152,7 @@ class OnboardingActivity : AppCompatActivity() {
         setStroke(dp(if (highlighted) 2 else 1), strokeColor)
     }
 
-    private fun buildCard(label: String, tileCount: Int, tileSeed: Int, deleteCount: Int): Demo {
+    private fun buildCard(label: String, tileCount: Int, tileSeed: Int, deleteCount: Int, isNew: Boolean = false): Demo {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = cardBackground(false)
@@ -205,6 +207,22 @@ class OnboardingActivity : AppCompatActivity() {
         }
         headerRow.addView(arrow)
         headerRow.addView(title)
+        if (isNew) {
+            val newBadge = TextView(this).apply {
+                text = "new"
+                textSize = 10f
+                setTextColor(ContextCompat.getColor(this@OnboardingActivity, R.color.primary))
+                setPadding(dp(8), dp(2), dp(8), dp(2))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(20).toFloat()
+                    setStroke(dp(1), ContextCompat.getColor(this@OnboardingActivity, R.color.primary))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { marginEnd = dp(6) }
+            }
+            headerRow.addView(newBadge)
+        }
         headerRow.addView(deletePill)
         headerRow.addView(pill)
         card.addView(headerRow)
@@ -439,28 +457,52 @@ class OnboardingActivity : AppCompatActivity() {
                     d.deletePill.animate().scaleX(1f).scaleY(1f).setDuration(120)
                         .withEndAction { d.deletePill.visibility = View.GONE }.start()
                 }.start()
-            val count = d.deleteIndices.count { it < d.body.childCount }
             d.deleteIndices.filter { it < d.body.childCount }.forEach { k ->
                 d.body.getChildAt(k).animate()
                     .alpha(0f).scaleX(0.1f).scaleY(0.1f).setStartDelay(200).setDuration(450).start()
             }
-            showDeletedToast(count)
             handler.postDelayed({ onComplete() }, 900)   // tiles gone → then reveal the Hide pill
         }
     }
 
-    /** Floating "Deleted N photos you didn't want to keep" — fades in, holds, fades out. */
-    private fun showDeletedToast(count: Int) {
+    /** Sticky snackbar (non-modal) that stays until [hideSnackbar]. Reassures that hiding ≠ deleting. */
+    private fun showSnackbarSticky(msg: String) {
         binding.tvDeletedToast.apply {
-            text = "Deleted $count photo${if (count == 1) "" else "s"} you didn't want to keep"
+            text = msg
             animate().cancel()
             alpha = 0f
             visibility = View.VISIBLE
-            animate().alpha(1f).setStartDelay(300).setDuration(300).withEndAction {
-                animate().alpha(0f).setStartDelay(2200).setDuration(400)
-                    .withEndAction { visibility = View.GONE }.start()
-            }.start()
+            animate().alpha(1f).setStartDelay(150).setDuration(350).start()
         }
+    }
+
+    private fun hideSnackbar() {
+        binding.tvDeletedToast.animate().cancel()
+        binding.tvDeletedToast.animate().alpha(0f).setDuration(300)
+            .withEndAction { binding.tvDeletedToast.visibility = View.GONE }.start()
+    }
+
+    /** Re-render the stack as the user would see it on returning: the untouched months + a new one. */
+    private fun renderReturn() {
+        demos.clear()
+        binding.demoStack.removeAllViews()
+        buildCard("April", 6, 3, 2)
+        buildCard("June", 5, 9, 2)
+        buildCard("July", 7, 15, 2, isNew = true)
+    }
+
+    /** End-of-demo recap — stays until the user closes or opts out. */
+    private fun showSummary() {
+        binding.tvSummaryBody.text =
+            "• You curated two months, in any order.\n" +
+            "• They stayed hidden — never deleted, still in your gallery.\n" +
+            "• When you came back, the hidden months stayed hidden.\n" +
+            "• So you moved on to what's new — real, lasting progress."
+        binding.tvYear.visibility = View.GONE
+        binding.demoStack.visibility = View.GONE
+        binding.tvCaption.visibility = View.GONE
+        binding.tvDeletedToast.visibility = View.GONE
+        binding.summaryBox.visibility = View.VISIBLE
     }
 
     /** Hide the month: finger taps the "Hide month" pill (press down→up), then the card collapses. */
@@ -490,14 +532,6 @@ class OnboardingActivity : AppCompatActivity() {
         anim.start()
     }
 
-    private fun animateProgress(pct: Int) {
-        binding.tvPct.text = "$pct% curated"
-        ObjectAnimator.ofInt(binding.pbCurated, "progress", binding.pbCurated.progress, pct).apply {
-            duration = 700
-            start()
-        }
-    }
-
     // ── Step timeline ────────────────────────────────────────────────────────
 
     private fun buildSteps(): List<Pair<Long, () -> Unit>> {
@@ -505,39 +539,48 @@ class OnboardingActivity : AppCompatActivity() {
         fun step(wait: Long, action: () -> Unit) { steps.add(wait to action) }
         fun cap(text: String?) { text?.let { binding.tvCaption.text = it } }
 
-        step(1500L) { binding.tvCaption.text = "Here are your months, waiting to be reviewed." }
+        step(1500L) { cap("Your months, waiting to be reviewed.") }
 
-        // Open the middle month first, then the two ends in random order — so we never open two
-        // adjacent months back-to-back except from the middle (avoids a top→bottom / bottom→top
-        // sequential feel). Valid orders: [1,0,2] or [1,2,0].
-        val order = listOf(1) + listOf(0, 2).shuffled()
-        val progress = listOf(34, 67, 100)
-        val expandCap  = listOf("Open one and look through its photos.", "Next month — open it up.", "…and the last one.")
-        val selectCap  = listOf("Tap the ones you don't want…", "Tap the junk, Delete it…", null)
-        val confirmCap = listOf("…and Delete them.", null, null)
-        val pillCap    = listOf("Then hide the whole month.", "…then hide it.", null)
-        val hideCap    = listOf("It steps out of your way — this app gets cleaner.", null, null)
+        // Curate the 1st and 3rd month — deliberately non-adjacent, to show you can pick up any
+        // month in any order (not a top-to-bottom slog). Months 1 and 3 (April, June) are left alone.
+        val order = listOf(0, 2)
+        val openCap = listOf("Start with any month — say March.", "Jump straight to any other — skip to May.")
+        val delCap  = listOf("Delete the junk you don't want.", "Same again — delete the junk.")
+        val hideCap = listOf("Then hide the month — it vanishes.", "…then hide. Gone from your way.")
 
         order.forEachIndexed { pos, m ->
-            step(2000L) { cap(expandCap[pos]); openMonth(m) }
+            step(2000L) { cap(openCap[pos]); openMonth(m) }
             // Fully chained: finger selects every photo → taps Delete → tiles vanish → THEN the Hide
-            // pill appears. Nothing here is on a timer relative to the previous beat, so the Delete
-            // and Hide buttons can never overlap regardless of device speed.
+            // pill appears (never overlapping the Delete button, regardless of device speed).
             step(5200L) {
-                cap(selectCap[pos])
-                selectForDelete(m) {
-                    cap(confirmCap[pos])
-                    confirmDelete(m) {
-                        cap(pillCap[pos]); showPill(m)
-                    }
-                }
+                cap(delCap[pos])
+                selectForDelete(m) { confirmDelete(m) { showPill(m) } }
             }
-            step(if (pos == 0) 2200L else 1800L) { cap(hideCap[pos]); hideMonth(m); animateProgress(progress[pos]) }
+            step(2200L) { cap(hideCap[pos]); hideMonth(m) }
         }
 
-        step(900L) {
-            binding.tvCaption.text = "All caught up — clean and curated."
+        // Payoff: what stays, then what happens when you come back.
+        step(2400L) {
+            cap("April and June can wait — that's fine.")
+            highlight(1); highlight(3)
+            showSnackbarSticky("Hid 2 months. Not deleted — still in your gallery.")
+        }
+        step(3400L) {
+            cap("Whenever you come back — tomorrow, next week, next month…")
+            hideSnackbar()
+            binding.tvYear.animate().alpha(0.15f).setDuration(500).start()
+            binding.demoStack.animate().alpha(0.15f).setDuration(500).start()
+        }
+        step(2600L) {
+            renderReturn()
+            cap("March and May stay hidden. You pick up where you left off — plus what's new.")
+            binding.tvYear.animate().alpha(1f).setDuration(500).start()
+            binding.demoStack.alpha = 0f
+            binding.demoStack.animate().alpha(1f).setDuration(500).start()
+        }
+        step(3200L) {
             binding.tvCaption.setTextColor(ContextCompat.getColor(this, R.color.check_green))
+            cap("Curate once. Stays curated.")
         }
         return steps
     }
@@ -558,6 +601,7 @@ class OnboardingActivity : AppCompatActivity() {
     /** The timeline reached the end. In mandatory mode, reveal the close ✕ (or opt out + close). */
     private fun onDemoComplete() {
         demoCompleted = true
+        showSummary()
         if (replay) return
         if (binding.cbDontShowAgain.isChecked) optOutAndFinish()
         else binding.btnCloseDemo.visibility = View.VISIBLE

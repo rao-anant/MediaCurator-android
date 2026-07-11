@@ -45,34 +45,6 @@
             android:background="@drawable/onboard_screen_bg"
             android:padding="16dp">
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
-
-                <com.google.android.material.progressindicator.LinearProgressIndicator
-                    android:id="@+id/pbCurated"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:max="100"
-                    android:progress="0"
-                    app:trackCornerRadius="4dp"
-                    app:trackThickness="6dp"
-                    app:indicatorColor="@color/check_green"
-                    app:trackColor="@color/surface_variant" />
-
-                <TextView
-                    android:id="@+id/tvPct"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:text="0% curated"
-                    android:textColor="@color/check_green"
-                    android:textSize="12sp" />
-            </LinearLayout>
-
             <TextView
                 android:id="@+id/tvCaption"
                 android:layout_width="match_parent"
@@ -85,11 +57,22 @@
                 android:textColor="@color/on_surface_variant"
                 android:textSize="13sp" />
 
+            <TextView
+                android:id="@+id/tvYear"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:layout_marginStart="2dp"
+                android:text="2024"
+                android:textColor="@color/on_surface_variant"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
             <LinearLayout
                 android:id="@+id/demoStack"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="4dp"
                 android:orientation="vertical" />
 
             <!-- Floating confirmation shown briefly after a demo delete -->
@@ -108,6 +91,33 @@
                 android:textColor="@color/on_surface"
                 android:textSize="12sp"
                 android:visibility="gone" />
+
+            <!-- End-of-demo recap — stays until the user closes or opts out. -->
+            <LinearLayout
+                android:id="@+id/summaryBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="8dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="That's the whole loop"
+                    android:textColor="@color/check_green"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvSummaryBody"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:lineSpacingExtra="5dp"
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="14sp" />
+            </LinearLayout>
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
 
