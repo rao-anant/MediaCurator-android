@@ -10,15 +10,16 @@ richer narrative in its own `PORTING_NOTES.md`; keep the two consistent (this ta
 
 ## How to use it (both Claudes)
 
-- **On startup, read this file.** Rows where **your** platform's cell is ⬜ (or 🚧) are your backlog.
-- **When you ship an item,** flip your cell to ✅ and stamp the build it landed in (e.g. `✅ a27` for
-  Android versionCode 27; iOS: `✅ b42` for build, or a date). Commit in the same change as the code.
-- **When you build something generic the other side will need,** add/refresh its row with your cell ✅
-  and theirs ⬜, so the other Claude picks it up. Same for a bug/feature you spot *for* the other side.
+- **On startup, read this file.** Rows where **your** platform's cell is TODO (or WIP) are your backlog.
+- **When you ship an item,** set your cell to DONE and stamp the build it landed in (e.g. `DONE a27` for
+  Android versionCode 27; iOS: `DONE b42` for build, or a date). Commit in the same change as the code.
+- **When you build something generic the other side will need,** add/refresh its row with your cell
+  DONE and theirs TODO, so the other Claude picks it up. Same for a bug/feature you spot *for* the other
+  side.
 - Keep rows at feature granularity, newest at the top of each section. Legend below.
 
-**Legend:** ✅ done (with build) · 🚧 partial / in progress · ⬜ not started · N/A not applicable ·
-`?` unknown — the owning side should confirm.
+**Legend (plain text, no emojis):** `DONE` (with build stamp) · `WIP` partial / in progress ·
+`TODO` not started · `N/A` not applicable · `?` unknown — the owning side should confirm.
 
 ## Handoff message — paste to the other Claude
 
@@ -30,11 +31,11 @@ It's direction-agnostic — works whether Android is handing off to iOS or vice-
 > alongside yours so you can read and edit it.
 >
 > 1. Add a startup hook to your repo's `CLAUDE.md`: "On startup, read PARITY.md. Rows where my
->    platform's cell is ⬜ / 🚧 / ? are my backlog. When I ship a generic feature/fix, I flip my cell to
->    ✅ with a build stamp (Android: `a<versionCode>`; iOS: `b<build>` or a date), in the **same commit**
->    as the code."
+>    platform's cell is TODO or WIP are my backlog. When I ship a generic feature/fix, set my cell to
+>    DONE with a build stamp (Android: `a<versionCode>`; iOS: `b<build>` or a date), in the **same
+>    commit** as the code."
 > 2. Reconcile any `?` cells for your platform against your own porting notes.
-> 3. Your backlog = every row where your column is ⬜ or 🚧. Work them, then flip the cell.
+> 3. Your backlog = every row where your column is TODO or WIP. Work them, then set the cell to DONE.
 > 4. When you find an issue, or build something generic the other platform will need, **add/refresh its
 >    row** so the other Claude picks it up.
 > 5. Specific hand-off right now: ______________________________________________
@@ -45,15 +46,15 @@ It's direction-agnostic — works whether Android is handing off to iOS or vice-
 
 | Feature | Spec § | Android | iOS | Origin / notes |
 |---|---|---|---|---|
-| Deleted photos leave the place-search grid | §7 | ✅ a28 | ⬜ | session-delete guard; re-query can briefly resurrect trashed items |
-| First-run place intro banner | §7 | ✅ a27 | ⬜ | one-time; `place_intro_shown` |
-| Place-search accuracy note (Settings) | §7 | ✅ a27 | ⬜ | "approximate / only located photos" |
-| Reinstall-safe place index | §7 | ✅ a27 | ⬜ | gzipped Downloads mirror, remap by name+size |
-| Exact-place fast path + warm-up | §7 | ✅ a27 | ⬜ | `placeExact` lookup |
-| Act-on-results / unified icon action bar | §3, §7 | ✅ a27 | ⬜ | Share·Rename·Switch Album·Show-in-gallery·Delete; single vs multi rule |
-| "By Country" browse (was "Drill down") | §7 | ✅ a26 | ⬜ | naming only |
-| Offline place search (search + browse) | §7 | ✅ a25 | ⬜ | GeoNames k-d tree; no network |
-| Coach hints persist until ✕ (not on hide) | §3 | ✅ a27 | ✅ | **ported FROM iOS** |
+| Deleted photos leave the place-search grid | §7 | DONE a28 | TODO | session-delete guard; re-query can briefly resurrect trashed items |
+| First-run place intro banner | §7 | DONE a27 | TODO | one-time; `place_intro_shown` |
+| Place-search accuracy note (Settings) | §7 | DONE a27 | TODO | "approximate / only located photos" |
+| Reinstall-safe place index | §7 | DONE a27 | TODO | gzipped Downloads mirror, remap by name+size |
+| Exact-place fast path + warm-up | §7 | DONE a27 | TODO | `placeExact` lookup |
+| Act-on-results / unified icon action bar | §3, §7 | DONE a27 | TODO | Share/Rename/Switch Album/Show-in-gallery/Delete; single vs multi rule |
+| "By Country" browse (was "Drill down") | §7 | DONE a26 | TODO | naming only |
+| Offline place search (search + browse) | §7 | DONE a25 | TODO | GeoNames k-d tree; no network |
+| Coach hints persist until dismissed (not on hide) | §3 | DONE a27 | DONE | ported FROM iOS |
 
 ## v1.0 — Baseline (Android shipped; iOS porting)
 
@@ -62,10 +63,10 @@ It's direction-agnostic — works whether Android is handing off to iOS or vice-
 
 | Feature | Spec § | Android | iOS | Notes |
 |---|---|---|---|---|
-| Gallery timeline (year/month, type chips, sort) | §2 | ✅ a1.0 | 🚧 | first vertical slice done on iOS |
-| Curation walk-gate + Hide month | §1–3 | ✅ a1.0 | ? | pure `CurationLogic` mirrored + JVM tests |
-| Full-screen viewer (share/rename/move/delete) | §4 | ✅ a1.0 | ? | |
-| Trash / soft-delete + undo | §8 | ✅ a1.0 | ? | |
-| Duplicate detection | §? | ✅ a1.0 | ? | |
-| PDF content search (BM25) | §7 | ✅ a1.0 | ? | |
-| Search (filenames, fuzzy) | §7 | ✅ a1.0 | ? | |
+| Gallery timeline (year/month, type chips, sort) | §2 | DONE a1.0 | WIP | first vertical slice done on iOS |
+| Curation walk-gate + Hide month | §1–3 | DONE a1.0 | ? | pure `CurationLogic` mirrored + JVM tests |
+| Full-screen viewer (share/rename/move/delete) | §4 | DONE a1.0 | ? | |
+| Trash / soft-delete + undo | §8 | DONE a1.0 | ? | |
+| Duplicate detection | §? | DONE a1.0 | ? | |
+| PDF content search (BM25) | §7 | DONE a1.0 | ? | |
+| Search (filenames, fuzzy) | §7 | DONE a1.0 | ? | |
