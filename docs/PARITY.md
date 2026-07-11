@@ -46,14 +46,14 @@ It's direction-agnostic — works whether Android is handing off to iOS or vice-
 
 | Feature | Spec § | Android | iOS | Origin / notes |
 |---|---|---|---|---|
-| Deleted photos leave the place-search grid | §7 | DONE a28 | TODO | session-delete guard; re-query can briefly resurrect trashed items |
+| Deleted photos leave the place-search grid | §7 | DONE a28 | DONE b12 | iOS: PlaceBrowse now excludes the staged-for-deletion set from media/records/photos, and keeps the open city across the refresh |
 | First-run place intro banner | §7 | DONE a27 | TODO | one-time; `place_intro_shown` |
 | Place-search accuracy note (Settings) | §7 | DONE a27 | TODO | "approximate / only located photos" |
 | Reinstall-safe place index | §7 | DONE a27 | TODO | gzipped Downloads mirror, remap by name+size |
 | Exact-place fast path + warm-up | §7 | DONE a27 | TODO | `placeExact` lookup |
 | Act-on-results / unified icon action bar | §3, §7 | DONE a27 | TODO | Share/Rename/Switch Album/Show-in-gallery/Delete; single vs multi rule |
-| "By Country" browse (was "Drill down") | §7 | DONE a26 | TODO | naming only |
-| Offline place search (search + browse) | §7 | DONE a25 | TODO | GeoNames k-d tree; no network |
+| "By Country" browse (was "Drill down") | §7 | DONE a26 | DONE b7 | naming only |
+| Offline place search (search + browse) | §7 | DONE a25 | DONE b1 | GeoNames k-d tree; no network |
 | Coach hints persist until dismissed (not on hide) | §3 | DONE a27 | DONE | ported FROM iOS |
 
 ## v1.0 — Baseline (Android shipped; iOS porting)
@@ -63,10 +63,10 @@ It's direction-agnostic — works whether Android is handing off to iOS or vice-
 
 | Feature | Spec § | Android | iOS | Notes |
 |---|---|---|---|---|
-| Gallery timeline (year/month, type chips, sort) | §2 | DONE a1.0 | WIP | first vertical slice done on iOS |
-| Curation walk-gate + Hide month | §1–3 | DONE a1.0 | ? | pure `CurationLogic` mirrored + JVM tests |
-| Full-screen viewer (share/rename/move/delete) | §4 | DONE a1.0 | ? | |
-| Trash / soft-delete + undo | §8 | DONE a1.0 | ? | |
-| Duplicate detection | §? | DONE a1.0 | ? | |
-| PDF content search (BM25) | §7 | DONE a1.0 | ? | |
-| Search (filenames, fuzzy) | §7 | DONE a1.0 | ? | |
+| Gallery timeline (year/month, type chips, sort) | §2 | DONE a1.0 | DONE b1 | full gallery shipped; sticky header, uniform square tiles, scroll-to-top |
+| Curation walk-gate + Hide month | §1–3 | DONE a1.0 | DONE b1 | pure `CurationLogic` + tests; G-1/G-2/G-3 settle-guards approximated via onAppear |
+| Full-screen viewer (share/rename/move/delete) | §4 | DONE a1.0 | DONE b1 | share + delete/undo; Rename & Move are N/A on iOS (no PHAsset API) |
+| Trash / soft-delete + undo | §8 | DONE a1.0 | DONE b1 | staged-for-deletion (app trash) + 6s undo; iOS can't restore committed deletes |
+| Duplicate detection | §? | DONE a1.0 | DONE b1 | MD5 `PhotoHashStore` + DuplicatesView |
+| PDF content search (BM25) | §7 | DONE a1.0 | TODO | Phase 2 (Option A) — feasible via PDFKit + document picker; deferred |
+| Search (filenames, fuzzy) | §7 | DONE a1.0 | TODO | Phase 2 (Option A) — deferred |
