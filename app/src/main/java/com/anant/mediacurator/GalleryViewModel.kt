@@ -1144,7 +1144,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
      * Incremental + resumable (PlaceStore skips already-scanned photos).
      */
     fun startPlaceIndexingInBackground(images: List<MediaItem>) {
-        placeIndexingJob?.cancel()
+        // Already running → let it keep going. Restarting on every gallery reload was throwing away
+        // in-flight progress (esp. on OEMs that kill the app on lock), so it never finished.
+        if (placeIndexingJob?.isActive == true) return
         val app = getApplication<android.app.Application>()
         val granted = androidx.core.content.ContextCompat.checkSelfPermission(
             app, android.Manifest.permission.ACCESS_MEDIA_LOCATION
@@ -1256,6 +1258,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
      */
     @OptIn(ExperimentalCoroutinesApi::class)   // Dispatchers.IO.limitedParallelism
     fun startPhotoHashingInBackground(photos: List<MediaItem>, forceStart: Boolean = false) {
+        // Already running → let it keep going (restarting on every reload reset progress, so on
+        // aggressive OEMs it never got past the first chunk). forceStart (resume) still restarts.
+        if (!forceStart && photoHashingJob?.isActive == true) return
         photoHashingJob?.cancel()
         if (photos.isEmpty() || !prefs.isPhotoDuplicateDetectionEnabled()) {
             _photoHashProgress.postValue(null)
@@ -1317,8 +1322,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             val hashDispatcher = Dispatchers.IO.limitedParallelism(workers)
 
             try {
-                // Outer batches of 200: flush + progress checkpoint boundaries.
-                for (batch in unprocessed.chunked(200)) {
+                // Outer batches of 50: flush + progress checkpoint boundaries. Small so a run killed
+                // mid-way (OEM lock-kill) keeps its progress and resumes instead of restarting.
+                for (batch in unprocessed.chunked(50)) {
                     if (!isActive) break
                     coroutineScope {
                         batch.map { item ->

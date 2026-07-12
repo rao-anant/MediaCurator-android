@@ -62,7 +62,10 @@ object PlaceIndexer {
             val city = if (ll != null) geo.nearest(ll[0], ll[1]) else null
             store.save(item.id, item.size, city)   // null city → stored empty (scanned, no GPS)
             done++
-            if (done % 200 == 0) { store.flush(); onProgress(done, todo.size) }
+            // Flush often (every 20) so progress survives the app being killed mid-scan — critical on
+            // OEMs (e.g. Samsung) that kill backgrounded apps on lock. A killed run then resumes
+            // instead of re-scanning from the top.
+            if (done % 20 == 0) { store.flush(); onProgress(done, todo.size) }
         }
         store.flush()
         // Refresh the reinstall-survival mirror now that new photos are indexed.
