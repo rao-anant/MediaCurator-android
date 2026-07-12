@@ -46,7 +46,7 @@ It's direction-agnostic — works whether Android is handing off to iOS or vice-
 
 | Feature | Spec § | Android | iOS | Origin / notes |
 |---|---|---|---|---|
-| Indexing resumable on OEM lock-kill | §7 | DONE a30 | ? | flush hash/geo progress every 20–50 items (was 200) + don't cancel/restart a running job. Symptom on Samsung: "Hashing 1/N" stuck + tiny geo cache because the app is killed on lock before a flush. iOS: confirm its indexing persists progress frequently and resumes after suspension |
+| Indexing resumable on OEM lock-kill | §7 | DONE a31 | ? | flush hash/geo progress every 20–50 items (was 200) + don't cancel/restart a running job. Symptom on Samsung: "Hashing 1/N" stuck + tiny geo cache because the app is killed on lock before a flush. iOS: confirm its indexing persists progress frequently and resumes after suspension |
 | Onboarding: self-paced slide deck | §13 | DONE a30 | DONE b16 | replaces the timed animation; Next/Back + dots, one animated slide, dashed "Hidden" shelf so the return never looks resurrected, recap |
 | Selection bar must not hide bottom photos | §3, §7 | DONE a29 | DONE b13 | iOS: place/hidden grid already used safeAreaInset; moved the gallery multi-select bar from a bottom overlay to safeAreaInset so it insets the grid instead of occluding the last row |
 | Deleted photos leave the place-search grid | §7 | DONE a28 | DONE b12 | iOS: PlaceBrowse now excludes the staged-for-deletion set from media/records/photos, and keeps the open city across the refresh |
