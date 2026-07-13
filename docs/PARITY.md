@@ -46,7 +46,7 @@ It's direction-agnostic — works whether Android is handing off to iOS or vice-
 
 | Feature | Spec § | Android | iOS | Origin / notes |
 |---|---|---|---|---|
-| Indexing resumable on OEM lock-kill + fast geo scan | §7 | DONE a31 | ? | Geo: parallel EXIF readers (2–4 workers), per-photo append-journal persistence (O(1), zero loss on kill), camera-roll-first ordering so cities appear immediately. Hashing: flush every 50 + don't restart a running job. Symptom on Samsung: "Hashing 1/N" stuck + tiny geo cache. iOS: confirm indexing persists per-item and resumes after suspension |
+| Indexing resumable on OEM lock-kill + fast geo scan | §7 | DONE a31 | DONE b18 | Android a31: parallel EXIF readers (2–4 workers), per-photo append-journal persistence (O(1), zero loss on kill), camera-roll-first ordering so cities appear immediately; hashing flush every 50 + don't restart a running job. iOS b18: batches the hash store to every 25 (was every item — O(n²) writes) + final flush; both stores skip already-cached items. iOS: consider mirroring parallel EXIF + camera-first ordering |
 | Onboarding: self-paced slide deck | §13 | DONE a30 | DONE b16 | replaces the timed animation; Next/Back + dots, one animated slide, dashed "Hidden" shelf so the return never looks resurrected, recap |
 | Selection bar must not hide bottom photos | §3, §7 | DONE a29 | DONE b13 | iOS: place/hidden grid already used safeAreaInset; moved the gallery multi-select bar from a bottom overlay to safeAreaInset so it insets the grid instead of occluding the last row |
 | Deleted photos leave the place-search grid | §7 | DONE a28 | DONE b12 | iOS: PlaceBrowse now excludes the staged-for-deletion set from media/records/photos, and keeps the open city across the refresh |
