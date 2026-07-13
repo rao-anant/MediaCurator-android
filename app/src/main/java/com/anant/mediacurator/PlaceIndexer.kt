@@ -5,6 +5,12 @@ import android.media.ExifInterface
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 
 /**
  * Reads photo GPS from EXIF and reverse-geocodes it **offline** (v1.1 Place search). Requires
@@ -35,15 +41,33 @@ object PlaceIndexer {
     } catch (e: Exception) { null }
 
     /**
-     * Index every image in [images] not already recorded in [store]: read GPS → nearest city → save
-     * its names. Photos with no GPS are saved empty so they aren't re-read next pass. The k-d tree is
-     * built once and released when done. [shouldContinue] cancels; [onProgress] reports (done,total).
+     * Rank a photo by how likely it is to carry GPS, so real places surface fast: camera-roll
+     * (DCIM) first; WhatsApp / screenshots / downloads (EXIF-stripped, never located) last.
      */
-    fun indexImages(
+    private fun gpsLikelihoodRank(item: MediaItem): Int {
+        if (item.isWhatsApp) return 2
+        val p = item.relativePath.lowercase()
+        return when {
+            "dcim" in p || "camera" in p                              -> 0
+            "screenshot" in p || "download" in p || "whatsapp" in p   -> 2
+            else                                                      -> 1
+        }
+    }
+
+    /**
+     * Index every image in [images] not already recorded in [store]: read GPS → nearest city → save
+     * its names. Photos with no GPS are saved empty so they aren't re-read next pass.
+     *
+     * Fast + kill-safe: EXIF header reads run on a small parallel worker pool (they're I/O-bound —
+     * ~3-4x throughput), each result is journaled to disk immediately by [PlaceStore.save] (O(1)
+     * append — survives OEM lock-kill at any point), and camera-roll photos go first so cities
+     * appear right away. Cancellation is cooperative via the caller's coroutine scope.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    suspend fun indexImages(
         context: Context,
         images: List<MediaItem>,
         store: PlaceStore,
-        shouldContinue: () -> Boolean = { true },
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }
     ) {
         store.ensureLoaded()
@@ -52,24 +76,37 @@ object PlaceIndexer {
         if (store.isEmpty()) store.restoreFromDownloads(images)
 
         val todo = images.filter { it.type == MediaType.IMAGE && !store.hasEntry(it.id, it.size) }
+            .sortedBy { gpsLikelihoodRank(it) }
         if (todo.isEmpty()) { onProgress(0, 0); return }
 
         val geo = loadGeoIndex(context)
-        var done = 0
-        for (item in todo) {
-            if (!shouldContinue()) break
-            val ll = readLatLon(context, item)
-            val city = if (ll != null) geo.nearest(ll[0], ll[1]) else null
-            store.save(item.id, item.size, city)   // null city → stored empty (scanned, no GPS)
-            done++
-            // Flush often (every 20) so progress survives the app being killed mid-scan — critical on
-            // OEMs (e.g. Samsung) that kill backgrounded apps on lock. A killed run then resumes
-            // instead of re-scanning from the top.
-            if (done % 20 == 0) { store.flush(); onProgress(done, todo.size) }
+        // Same worker sizing as photo hashing: parallel streams help on UFS flash, hurt on eMMC.
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val workers = if (am.isLowRamDevice || Runtime.getRuntime().availableProcessors() <= 4) 2 else 4
+        val dispatcher = Dispatchers.IO.limitedParallelism(workers)
+        val counter = java.util.concurrent.atomic.AtomicInteger(0)
+
+        try {
+            coroutineScope {
+                for (batch in todo.chunked(100)) {
+                    ensureActive()   // cancellation checkpoint between batches
+                    batch.map { item ->
+                        async(dispatcher) {
+                            val ll = readLatLon(context, item)
+                            val city = if (ll != null) geo.nearest(ll[0], ll[1]) else null
+                            store.save(item.id, item.size, city)   // journaled: survives kill
+                            val n = counter.incrementAndGet()
+                            if (n % 25 == 0) onProgress(n, todo.size)
+                        }
+                    }.awaitAll()
+                }
+            }
+        } finally {
+            // Runs on completion AND cancellation: compact the journal; refresh the reinstall
+            // mirror only after new work (also on partial runs, so reinstalls keep the progress).
+            store.flush()
+            if (counter.get() > 0) store.backupToDownloads(images)
+            onProgress(counter.get(), todo.size)
         }
-        store.flush()
-        // Refresh the reinstall-survival mirror now that new photos are indexed.
-        if (done > 0) store.backupToDownloads(images)
-        onProgress(done, todo.size)
     }
 }

@@ -41,6 +41,11 @@ class PlaceStore private constructor(context: Context) {
     private val cacheFile = File(context.filesDir, "place_cache_v2.txt")
     private val cache = HashMap<Long, Pair<Long, String>>()   // id -> (size, value)
     private var loaded = false
+    // Append-mode journal writer, lazily opened by save(). Each save appends ONE line and flushes to
+    // the OS, so every scanned photo survives a process kill (Samsung kills on lock) — without ever
+    // rewriting the whole file mid-run. Duplicate lines are fine: on load, later lines win; flush()
+    // closes the journal and compacts the file.
+    private var journal: java.io.BufferedWriter? = null
 
     @Synchronized
     fun ensureLoaded() {
@@ -62,7 +67,16 @@ class PlaceStore private constructor(context: Context) {
     fun hasEntry(id: Long, size: Long): Boolean = cache[id]?.first == size
 
     @Synchronized
-    fun save(id: Long, size: Long, city: GeoCity?) { cache[id] = size to encode(city) }
+    fun save(id: Long, size: Long, city: GeoCity?) {
+        val value = encode(city)
+        cache[id] = size to value
+        // Journal the entry immediately (O(1) append; write() reaches the kernel, so it survives an
+        // app kill — only power loss could drop it, and a re-scan of a few photos is fine then).
+        try {
+            val w = journal ?: java.io.BufferedWriter(java.io.FileWriter(cacheFile, true)).also { journal = it }
+            w.write("$id\t$size\t$value"); w.newLine(); w.flush()
+        } catch (e: Exception) { Log.e("PlaceStore", "journal append failed", e) }
+    }
 
     @Synchronized
     fun deleteEntry(id: Long) { cache.remove(id) }
@@ -91,8 +105,11 @@ class PlaceStore private constructor(context: Context) {
             .mapNotNull { decode(it) }
             .toList()
 
+    /** Close the journal and compact the file (dedupe appended lines). Call at end-of-run. */
     @Synchronized
     fun flush() {
+        try { journal?.close() } catch (_: Exception) {}
+        journal = null
         try {
             cacheFile.bufferedWriter().use { w ->
                 for ((id, v) in cache) { w.write("$id\t${v.first}\t${v.second}"); w.newLine() }
@@ -106,6 +123,8 @@ class PlaceStore private constructor(context: Context) {
     @Synchronized
     fun clear() {
         cache.clear()
+        try { journal?.close() } catch (_: Exception) {}
+        journal = null
         try { if (cacheFile.exists()) cacheFile.delete() } catch (_: Exception) {}
     }
 

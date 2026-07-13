@@ -1154,10 +1154,10 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         if (images.isEmpty() || !prefs.isPlaceSearchEnabled() || !granted) return
         placeIndexingJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                PlaceIndexer.indexImages(
-                    app, images, PlaceStore.getInstance(app),
-                    shouldContinue = { isActive }
-                )
+                // Suspend fun: parallel EXIF readers inside; cancellation propagates from this scope.
+                PlaceIndexer.indexImages(app, images, PlaceStore.getInstance(app))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e   // normal teardown — PlaceIndexer's finally already compacted the journal
             } catch (e: Exception) {
                 Log.e("GalleryViewModel", "place indexing failed", e)
             }
