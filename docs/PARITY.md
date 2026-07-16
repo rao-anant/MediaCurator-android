@@ -38,14 +38,18 @@ It's direction-agnostic — works whether Android is handing off to iOS or vice-
 > 3. Your backlog = every row where your column is TODO or WIP. Work them, then set the cell to DONE.
 > 4. When you find an issue, or build something generic the other platform will need, **add/refresh its
 >    row** so the other Claude picks it up.
-> 5. Specific hand-off right now: ______________________________________________
->    (e.g. "In place-search, deleting photos must make them leave the grid and not resurface — Android
->    fixed it with a session-delete guard; check whether your platform has the same bug.")
+> 5. Specific hand-off right now: The library fetch dedupes by `(displayName, size)`
+>    (`MediaRepository.kt:70` `distinctBy { "${it.displayName}_${it.size}" }`). That silently drops one
+>    of every pair of distinct files that happen to share a name+size, so the duplicate finder can never
+>    surface them. iOS hit this hard (iOS "Duplicate" keeps the same filename) and fixed it in b23 by
+>    deduping on asset identity instead. Check Android: switch to a stable MediaStore `_ID`/content-URI
+>    key so genuine duplicates survive the scan.
 
 ## v1.1 — Place search & recent work
 
 | Feature | Spec § | Android | iOS | Origin / notes |
 |---|---|---|---|---|
+| Duplicate finder must not pre-dedupe library by (name, size) | §8 | TODO | DONE b23 | The full-library fetch deduped by `"(displayName)_(size)"`, silently dropping one of every exact-duplicate pair BEFORE the duplicate finder saw it — so identical copies (same name+size) can never be detected. iOS b23: dedupe by asset identity (`localIdentifier`) instead. Android has the same `distinctBy { "${it.displayName}_${it.size}" }` (`MediaRepository.kt:70`) — copies sharing a name+size (WhatsApp forwards, re-synced files) are dropped the same way; switch to a stable MediaStore `_ID`/content-URI identity |
 | Indexing resumable on OEM lock-kill + fast geo scan | §7 | DONE a32 | DONE b18 | Android: hashing flush every 50 + don't-restart-running-job shipped in a31; the fast geo scan (parallel EXIF readers 2–4 workers, per-photo append-journal persistence — O(1), zero loss on kill — and camera-roll-first ordering so cities appear immediately) ships in a32. iOS b18: batches the hash store to every 25 (was every item — O(n²) writes) + final flush; both stores skip already-cached items. iOS b19: reads all GPS in ONE PHAsset fetch — a bulk Photos-DB read, so parallel EXIF workers are N/A (no per-file I/O to parallelise); progress throttled to every 25. Camera-first ordering is marginal on iOS since the bulk read is already fast |
 | Background-finish indexing (deferrable, charging + idle) | §7 | TODO | DONE b21 | Let hashing/geo finish while the app is closed. iOS: BGProcessingTask (needs a Background-Modes Info.plist entry; no signing/App-ID change). Android analog: WorkManager with charging/idle constraints — would also survive the OEM lock-kill. Neither shipped yet; idea flagged for both |
 | Onboarding: self-paced slide deck | §13 | DONE a30 | DONE b16 | replaces the timed animation; Next/Back + dots, one animated slide, dashed "Hidden" shelf so the return never looks resurrected, recap |
