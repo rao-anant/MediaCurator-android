@@ -65,9 +65,13 @@ class MediaRepository(private val context: Context) {
             mediaList
         )
 
-        // Deduplicate based on display name and size to handle files indexed in multiple collections.
-        // This is more stable than URI which depends on the collection view (Files vs Images).
-        val finalResult = mediaList.distinctBy { "${it.displayName}_${it.size}" }
+        // Dedupe on the stable MediaStore _ID: it's globally unique across the Images/Video/Audio/Files
+        // views, and the SAME physical file has the SAME _ID in every collection — so this still removes
+        // a file indexed in multiple collections (the original intent), while keeping genuinely different
+        // files that merely share a name+size. Deduping by "name_size" (the old key) silently dropped one
+        // of every such pair BEFORE the duplicate finder saw it — so exact-duplicate copies (WhatsApp
+        // forwards, re-synced files) could never be detected, and one copy was hidden from the gallery too.
+        val finalResult = mediaList.distinctBy { it.id }
 
         Log.d("MediaRepository", "Fetched total: ${finalResult.size} items. " +
                 "Images: ${finalResult.count { it.type == MediaType.IMAGE }}, " +
