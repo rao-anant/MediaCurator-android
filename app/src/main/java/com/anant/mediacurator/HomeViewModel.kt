@@ -124,6 +124,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         // switched on. With it off, hashing never runs, so gating would strand the card forever.
         val hashing = prefs.isPhotoDuplicateDetectionEnabled() && photosTotal > 0 && photosHashed < photosTotal
         val dupSub = when {
+            // Nothing hashed yet → hashing hasn't run at all, and it only runs from the gallery:
+            // on a fresh install it defers until the all-files-access prompt resolves, and that
+            // prompt lives in the gallery. A bare "Hashing photos 0/N" would just look stuck, so
+            // say what actually moves it forward.
+            hashing && photosHashed == 0 -> "Open the gallery to scan"
             hashing        -> "Hashing photos $photosHashed/$photosTotal"
             dupGroups < 0  -> "Not scanned yet"
             dupGroups == 0 -> "None found"
