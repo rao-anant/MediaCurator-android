@@ -59,6 +59,11 @@ class MainActivity : AppCompatActivity() {
     private var pendingShowStats = false           // Home "Hidden & stats" card: show stats once loaded
     private var pendingScrollToTopMonth: String? = null  // month just opened → scroll its header to top
     private var pendingScrollToTopYear: Int? = null      // year just opened → scroll its header to top
+    // Collapsing from the sticky header deletes every row the user scrolled past, so the
+    // RecyclerView's anchor item disappears and it falls back to a raw pixel offset — landing on
+    // an unrelated month. Anchor the parent level instead, one step up like the in-list tree.
+    private var pendingAnchorMonthKey: String? = null    // collapse → land on this month header
+    private var pendingAnchorYear: Int? = null           // collapse → land on this year header
 
     // Released once the durable "demo already shown" marker has been consulted — blocks the
     // first-run demo from flashing on a reinstall before that read completes.
@@ -837,6 +842,44 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
+            // A collapse from the sticky header → land on the parent level, so the user stays in
+            // context instead of being dumped wherever the raw pixel offset falls once the collapsed
+            // rows vanish. Deliberately NOT pendingScrollToTopMonth: that re-arms the curation walk
+            // latch via walk.onOpenedAtTop(), which a collapse must never do.
+            pendingAnchorMonthKey?.let { key ->
+                if (items.any { it is GalleryItem.Header && it.monthKey == key }) {
+                    binding.appBarLayout.setExpanded(true, false)
+                    binding.recyclerView.doOnPreDraw {
+                        val p = adapter.currentList.indexOfFirst {
+                            it is GalleryItem.Header && it.monthKey == key
+                        }
+                        if (p >= 0) {
+                            (binding.recyclerView.layoutManager as? GridLayoutManager)
+                                ?.scrollToPositionWithOffset(p, stickyHeaderOffset())
+                        }
+                        pendingAnchorMonthKey = null
+                        updateStickyHeader()
+                        updateHideBarWhenSettled()
+                    }
+                }
+            }
+            pendingAnchorYear?.let { year ->
+                if (items.any { it is GalleryItem.YearHeader && it.year == year }) {
+                    binding.appBarLayout.setExpanded(true, false)
+                    binding.recyclerView.doOnPreDraw {
+                        val p = adapter.currentList.indexOfFirst {
+                            it is GalleryItem.YearHeader && it.year == year
+                        }
+                        if (p >= 0) {
+                            (binding.recyclerView.layoutManager as? GridLayoutManager)
+                                ?.scrollToPositionWithOffset(p, 0)
+                        }
+                        pendingAnchorYear = null
+                        updateStickyHeader()
+                        updateHideBarWhenSettled()
+                    }
+                }
+            }
             val isLoading = viewModel.isLoading.value ?: false
             binding.tvEmpty.isVisible = items.isEmpty() && !isLoading
             if (items.isEmpty() && !isLoading) binding.tvEmpty.text = resolveEmptyMessage()
@@ -1351,9 +1394,15 @@ class MainActivity : AppCompatActivity() {
         val capturedYear = yearCtx.year
         if (monthCtx != null && (showMonth || showSub)) {
             val capturedMonthKey = monthCtx.monthKey
-            binding.stickyYearRow.setOnClickListener { viewModel.toggleMonthExpansion(capturedMonthKey) }
+            binding.stickyYearRow.setOnClickListener {
+                pendingAnchorMonthKey = capturedMonthKey   // → that year's month list, month in view
+                viewModel.toggleMonthExpansion(capturedMonthKey)
+            }
         } else {
-            binding.stickyYearRow.setOnClickListener { viewModel.toggleYearExpansion(capturedYear) }
+            binding.stickyYearRow.setOnClickListener {
+                pendingAnchorYear = capturedYear           // → the all-years list, year in view
+                viewModel.toggleYearExpansion(capturedYear)
+            }
         }
 
         // Month row — tap collapses the month
@@ -1362,7 +1411,10 @@ class MainActivity : AppCompatActivity() {
             binding.tvStickyMonth.text      = monthCtx.label
             binding.tvStickyMonthStats.text = GalleryAdapter.formatTypeBreakdown(monthCtx.photoCount, monthCtx.videoCount, monthCtx.pdfCount, monthCtx.totalBytes)
             val capturedMonthKey = monthCtx.monthKey
-            binding.stickyMonthRow.setOnClickListener { viewModel.toggleMonthExpansion(capturedMonthKey) }
+            binding.stickyMonthRow.setOnClickListener {
+                pendingAnchorMonthKey = capturedMonthKey   // → that year's month list, month in view
+                viewModel.toggleMonthExpansion(capturedMonthKey)
+            }
         }
 
         // Sub row — tap collapses the sub-group
@@ -1370,8 +1422,13 @@ class MainActivity : AppCompatActivity() {
             binding.tvStickySubArrow.text = if (subCtx.isExpanded) "▼" else "▶"
             binding.tvStickySubLabel.text = subCtx.label
             binding.tvStickySubStats.text = GalleryAdapter.formatTypeBreakdown(subCtx.photoCount, subCtx.videoCount, subCtx.pdfCount, subCtx.totalBytes)
-            val capturedSubKey = subCtx.subKey
-            binding.stickySubRow.setOnClickListener { viewModel.toggleSubGroupExpansion(capturedSubKey) }
+            val capturedSubKey      = subCtx.subKey
+            val capturedSubMonthKey = subCtx.monthKey
+            binding.stickySubRow.setOnClickListener {
+                // → the parent month, still expanded: its sub-groups (Camera / WhatsApp) back in view
+                pendingAnchorMonthKey = capturedSubMonthKey
+                viewModel.toggleSubGroupExpansion(capturedSubKey)
+            }
         }
     }
 

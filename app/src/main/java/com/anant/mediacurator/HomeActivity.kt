@@ -302,6 +302,10 @@ class HomeActivity : AppCompatActivity() {
         }
 
         binding.cardDuplicates.tvCardSub.text = s.dupSub
+        // Still hashing photos → results would under-report. Dim and disable until they're done.
+        binding.cardDuplicates.root.isEnabled   = s.dupEnabled
+        binding.cardDuplicates.root.isClickable = s.dupEnabled
+        binding.cardDuplicates.root.alpha       = if (s.dupEnabled) 1f else 0.5f
         binding.cardHidden.tvCardSub.text     = s.hiddenSub
         binding.cardTrash.tvCardSub.text      = s.trashSub
         // Nothing to open when the trash is empty — dim and disable the card.

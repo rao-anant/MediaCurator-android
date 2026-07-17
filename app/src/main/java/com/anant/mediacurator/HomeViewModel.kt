@@ -20,6 +20,7 @@ data class HomeState(
     val heroButton: String,
     val resumeMonthKey: String?,    // for the Stage 3 deep-link
     val dupSub: String,
+    val dupEnabled: Boolean,        // false while photos are still hashing — results would under-report
     val hiddenSub: String,
     val trashSub: String,
     val trashEmpty: Boolean,
@@ -69,11 +70,18 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             hashStore.ensureLoaded()
             val dupGroups = if (hashStore.countEntries() == 0) -1 else hashStore.findDuplicateGroups().size
 
+            // Duplicate results are only trustworthy once every PHOTO is hashed: hashing runs
+            // photos-first (videos fill in after), so opening Duplicates on a partial photo set
+            // silently under-reports groups. Counted against the same singleton store the hashing
+            // writes into, so this needs no cross-activity progress plumbing.
+            val photos       = media.filter { it.type == MediaType.IMAGE }
+            val photosHashed = photos.count { hashStore.hasValidEntry(it.id, it.size) }
+
             // In-Trash is derived from the actual trash (ground truth) — a prefs counter would
             // drift whenever the trash changes outside our app (external restore, OS auto-purge).
             val trashed = TrashManager.get(getApplication()).listTrashed()
             val state = buildState(media.size, totalSize, hiddenItems, totalMonths, doneMonths, resumeKey, labelTarget, deepLink, dupGroups,
-                trashed.size.toLong(), trashed.sumOf { it.size })
+                trashed.size.toLong(), trashed.sumOf { it.size }, photosHashed, photos.size)
             DebugLog.i("home", "load: done media=${media.size} months=$totalMonths/$doneMonths dup=$dupGroups -> '${state.summary}'")
             _state.postValue(state)
         }
@@ -82,7 +90,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private fun buildState(
         total: Int, size: Long, hidden: Int,
         totalMonths: Int, doneMonths: Int, resumeKey: String?, labelTarget: String?, deepLink: String?, dupGroups: Int,
-        trashCount: Long, trashBytes: Long
+        trashCount: Long, trashBytes: Long, photosHashed: Int, photosTotal: Int
     ): HomeState {
         val cShort = { n: Int -> GalleryAdapter.fmtCountShort(n) }
         val summary =
@@ -112,7 +120,11 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
+        // Gate the card until every photo is hashed — but only when duplicate detection is actually
+        // switched on. With it off, hashing never runs, so gating would strand the card forever.
+        val hashing = prefs.isPhotoDuplicateDetectionEnabled() && photosTotal > 0 && photosHashed < photosTotal
         val dupSub = when {
+            hashing        -> "Hashing photos $photosHashed/$photosTotal"
             dupGroups < 0  -> "Not scanned yet"
             dupGroups == 0 -> "None found"
             else           -> "$dupGroups ${if (dupGroups == 1) "group" else "groups"}"
@@ -123,7 +135,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                        else "${cShort(trashCount.toInt())} · ${GalleryAdapter.fmtBytes(trashBytes)}"
 
         return HomeState(summary, title, progress, progressLabel, caption, resumeLabel, button,
-            deepLinkOut, dupSub, hiddenSub, trashSub, trashEmpty)
+            deepLinkOut, dupSub, !hashing, hiddenSub, trashSub, trashEmpty)
     }
 
     private val monthNames = arrayOf(
