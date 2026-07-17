@@ -183,9 +183,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         // Fixed filename so we can always overwrite / locate the single live backup.
         const val AUTO_BACKUP_FILENAME        = "mediacurator_hidden.json"
         const val PDF_INDEX_BACKUP_FILENAME   = "mediacurator_pdf_index.json.gz"
-        // Tab-separated: displayName \t size \t md5hex — one entry per line, gzip compressed.
-        // Keyed by displayName+size so IDs survive reinstall.
-        const val PHOTO_HASH_BACKUP_FILENAME  = "mediacurator_photo_hashes.txt.gz"
+        // Photo-hash Downloads mirror now lives in PhotoHashStore (see BACKUP_FILENAME there).
     }
 
     private var pendingItemsToDelete: List<MediaItem>? = null
@@ -1152,6 +1150,9 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             app, android.Manifest.permission.ACCESS_MEDIA_LOCATION
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (images.isEmpty() || !prefs.isPlaceSearchEnabled() || !granted) return
+        // Schedule the background job to finish geo indexing if the app is closed/killed (unique +
+        // KEEP; no-ops if nothing is left). Enqueued for hashing too — one worker covers both.
+        IndexingScheduler.enqueue(app)
         placeIndexingJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 // Suspend fun: parallel EXIF readers inside; cancellation propagates from this scope.
@@ -1292,89 +1293,38 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
+        // A background WorkManager job finishes whatever this foreground run doesn't — so hashing
+        // completes even if the app is closed or the OEM kills it on lock. Unique + KEEP, so this
+        // just ensures one is scheduled; it no-ops if there's nothing left to do.
+        IndexingScheduler.enqueue(getApplication())
+
         photoHashingJob = viewModelScope.launch(Dispatchers.IO) {
-            photoHashStore.ensureLoaded()
-
-            // On a fresh install the cache is empty — try restoring from the Downloads backup
-            // first so we don't re-hash everything from scratch.
-            if (photoHashStore.countEntries() == 0 && photos.isNotEmpty()) {
-                restorePhotoHashFromBackup(photos)
-            }
-
-            val unprocessed = photos.filter { !photoHashStore.hasValidEntry(it.id, it.size) }
-            if (unprocessed.isEmpty()) {
-                _photoHashProgress.postValue(null)
-                return@launch
-            }
-
-            val total = unprocessed.size
-            val hashedCounter = java.util.concurrent.atomic.AtomicInteger(0)
-            Log.d("GalleryViewModel", "Photo hashing: $total photos need hashing")
-            _photoHashProgress.postValue(PhotoHashProgress(0, total, false))
-
-            // Bounded parallelism: MD5 is I/O-bound (flash read dominates).  On UFS storage
-            // (flagships) 4 concurrent streams ≈ 3-4x throughput.  On low-RAM/eMMC devices
-            // (most budget phones) parallel streams thrash the slower flash controller and
-            // compete with 4 slow cores — 2 workers is the sweet spot there.
-            val am = getApplication<Application>()
-                .getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-            val workers = if (am.isLowRamDevice || Runtime.getRuntime().availableProcessors() <= 4) 2 else 4
-            val hashDispatcher = Dispatchers.IO.limitedParallelism(workers)
-
-            try {
-                // Outer batches of 50: flush + progress checkpoint boundaries. Small so a run killed
-                // mid-way (OEM lock-kill) keeps its progress and resumes instead of restarting.
-                for (batch in unprocessed.chunked(50)) {
-                    if (!isActive) break
-                    coroutineScope {
-                        batch.map { item ->
-                            async(hashDispatcher) {
-                                try {
-                                    val md5 = repo.computeMd5(item)
-                                    if (md5.isNotEmpty()) photoHashStore.saveHash(item.id, item.size, md5)
-                                } catch (e: Throwable) {
-                                    if (e is OutOfMemoryError) throw e   // escalate to outer handler
-                                    Log.w("GalleryViewModel", "computeMd5 threw for ${item.displayName}", e)
-                                }
-                                // Throttle UI updates: post every 25 items instead of every item
-                                // (16k postValues = pointless main-thread churn; LiveData conflates
-                                // anyway, but no reason to generate them).
-                                val done = hashedCounter.incrementAndGet()
-                                if (done % 25 == 0 || done == total) {
-                                    _photoHashProgress.postValue(PhotoHashProgress(done, total, false))
-                                }
-                            }
-                        }.awaitAll()
-                    }
-                    photoHashStore.flush()   // persist each batch — partial progress survives crash
+            // Single hashing implementation, shared with IndexingWorker. It restores from the
+            // Downloads mirror if empty, hashes in kill-safe batches, and backs up on completion.
+            // In-progress updates drive the progress bar (isDone=false); the final state is set
+            // from the Result below so a "nothing to do" run clears the indicator instead of
+            // flashing 100%.
+            var sawTotal = 0
+            val result = PhotoHasher.hashPhotos(getApplication(), photos, photoHashStore, repo) { done, total ->
+                if (total > 0) {
+                    sawTotal = total
+                    _photoHashProgress.postValue(PhotoHashProgress(done, total, false))
                 }
-            } catch (oom: OutOfMemoryError) {
-                val hashed = hashedCounter.get()
-                DebugLog.e("gallery", "Photo hashing OOM after $hashed/$total — auto-disabling", oom)
-                prefs.setPhotoDuplicateDetectionEnabled(false)
-                photoHashStore.flush()
-                _photoHashProgress.postValue(null)
-                _photoHashOomEvent.postValue(Unit)
-                return@launch
             }
-            val hashed = hashedCounter.get()
-
-            // Always persist partial progress, even if this job was cancelled mid-run
-            // (loadMedia cancels and restarts us on every resume).
-            photoHashStore.flush()
-
-            // But only a job that ran to completion may write the backup and post "done" —
-            // a cancelled run would overwrite a complete backup with a partial one and
-            // falsely clear the progress UI of the replacement job.
-            if (!isActive) return@launch
-
-            Log.d("GalleryViewModel", "Photo hashing complete. $hashed/$total processed.")
-
-            // Save backup BEFORE posting isDone=true.  If the user uninstalls the moment
-            // they see the progress bar disappear, the backup must already be on disk.
-            savePhotoHashBackup(photos)
-
-            _photoHashProgress.postValue(PhotoHashProgress(hashed, total, true))
+            when (result) {
+                PhotoHasher.Result.OOM -> {
+                    DebugLog.e("gallery", "Photo hashing OOM — auto-disabling duplicate detection")
+                    prefs.setPhotoDuplicateDetectionEnabled(false)
+                    _photoHashProgress.postValue(null)
+                    _photoHashOomEvent.postValue(Unit)
+                }
+                // Cancelled (loadMedia restarts us on every resume): PhotoHasher already flushed
+                // partial progress; leave the progress UI for the replacement job.
+                PhotoHasher.Result.CANCELLED -> {}
+                PhotoHasher.Result.COMPLETED ->
+                    if (sawTotal > 0) _photoHashProgress.postValue(PhotoHashProgress(sawTotal, sawTotal, true))
+                    else _photoHashProgress.postValue(null)   // nothing needed hashing
+            }
         }
     }
 
@@ -1393,210 +1343,6 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         deferredHashMedia = null
         hashingPermissionReady = true
         DebugLog.i("gallery", "resumeDeferredHashing: armed force-start, hashing will begin after PDF indexing")
-    }
-
-    // ── Photo hash backup / restore ───────────────────────────────────────────
-
-    /**
-     * Save all photo/video hashes to a gzip-compressed tab-separated file in Downloads.
-     * Format per line: displayName \t size \t md5hex
-     * Keyed by displayName+size so IDs survive reinstall.
-     *
-     * On Android 10+ uses MediaStore.Downloads (no special permission needed).
-     * Falls back to direct file write on older versions.
-     */
-    private fun savePhotoHashBackup(mediaItems: List<MediaItem>) {
-        val app      = getApplication<Application>()
-        val resolver = app.contentResolver
-
-        fun writeTo(out: java.io.OutputStream) {
-            GZIPOutputStream(out).use { gzip ->
-                gzip.bufferedWriter(Charsets.UTF_8).use { writer ->
-                    var written = 0
-                    for (item in mediaItems) {
-                        val md5 = photoHashStore.getHash(item.id) ?: continue
-                        writer.write("${item.displayName}\t${item.size}\t$md5\n")
-                        written++
-                    }
-                    Log.d("GalleryViewModel", "Photo hash backup: wrote $written entries")
-                }
-            }
-        }
-
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val backupFile   = java.io.File(downloadsDir, PHOTO_HASH_BACKUP_FILENAME)
-        val base         = PHOTO_HASH_BACKUP_FILENAME.removeSuffix(".txt.gz")
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val collection = MediaStore.Downloads.getContentUri("external")
-
-                // Write the NEW backup first — if the app dies mid-write, the previous
-                // backup is still intact.  MediaStore auto-numbers the new file
-                // ("name (1).txt.gz") if old copies exist; restore picks the newest by
-                // DATE_MODIFIED / lastModified, so coexistence is harmless.
-                val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, PHOTO_HASH_BACKUP_FILENAME)
-                    put(MediaStore.Downloads.MIME_TYPE, "application/gzip")
-                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                }
-                val uri = resolver.insert(collection, values)
-                    ?: throw Exception("MediaStore insert returned null")
-                resolver.openOutputStream(uri)?.use { writeTo(it) }
-                    ?: throw Exception("openOutputStream returned null for $uri")
-
-                // New backup is safely on disk — now clean up older copies.
-                // Resolve OUR new file's name (may be auto-numbered) so we don't delete it.
-                val newName = resolver.query(uri, arrayOf(MediaStore.Downloads.DISPLAY_NAME),
-                    null, null, null)?.use { c ->
-                    if (c.moveToFirst()) c.getString(0) else null
-                } ?: PHOTO_HASH_BACKUP_FILENAME
-
-                // NOTE: Android auto-numbering inserts " (1)" BEFORE the last extension:
-                // "name.txt.gz" → "name.txt (1).gz".  So match on prefix + ".gz", never
-                // on the full ".txt.gz" suffix (which numbered variants don't have).
-                try {
-                    resolver.delete(collection,
-                        "${MediaStore.Downloads.DISPLAY_NAME} LIKE ? AND ${MediaStore.Downloads.DISPLAY_NAME} != ?",
-                        arrayOf("$base%.gz", newName))
-                } catch (_: Exception) {}
-
-                // Direct-path cleanup for stale files owned by a previous install that
-                // MediaStore deletion can't touch.
-                if (android.os.Environment.isExternalStorageManager()) {
-                    downloadsDir.listFiles { f ->
-                        f.name.startsWith(base) && f.name.endsWith(".gz") && f.name != newName
-                    }?.forEach { try { it.delete() } catch (_: Exception) {} }
-                }
-
-                // If our new file got auto-numbered (plain name was taken at insert time),
-                // rename it back to the plain name now that the old copies are gone.
-                // Purely cosmetic — restore matches by prefix — but stops the numbering
-                // from creeping up ((1), (2), …) across successive saves.
-                if (newName != PHOTO_HASH_BACKUP_FILENAME) {
-                    try {
-                        resolver.update(uri, ContentValues().apply {
-                            put(MediaStore.Downloads.DISPLAY_NAME, PHOTO_HASH_BACKUP_FILENAME)
-                        }, null, null)
-                    } catch (_: Exception) {}
-                }
-            } else {
-                // Pre-Q: write to a temp file, then atomically swap into place.
-                val tmp = java.io.File(downloadsDir, "$PHOTO_HASH_BACKUP_FILENAME.tmp")
-                tmp.parentFile?.mkdirs()
-                tmp.outputStream().use { writeTo(it) }
-                if (!tmp.renameTo(backupFile)) {
-                    // Rename across same dir should always work; fall back to copy+delete
-                    tmp.copyTo(backupFile, overwrite = true)
-                    tmp.delete()
-                }
-            }
-            DebugLog.i("gallery", "Photo hash backup saved to Downloads")
-        } catch (e: Exception) {
-            DebugLog.e("gallery", "savePhotoHashBackup failed", e)
-        }
-    }
-
-    /**
-     * Restore hashes from the Downloads backup into [photoHashStore].
-     * Maps backup entries (keyed by displayName+size) to the current MediaStore IDs.
-     * Called once at the start of a hashing run when the internal cache is empty.
-     *
-     * Try order on Android 10+:
-     *  1. MediaStore.Downloads query (works for files this package created)
-     *  2. Direct file path fallback (works when MANAGE_EXTERNAL_STORAGE is granted,
-     *     or if the file survives as accessible on the filesystem)
-     */
-    private fun restorePhotoHashFromBackup(mediaItems: List<MediaItem>) {
-        val app      = getApplication<Application>()
-        val resolver = app.contentResolver
-
-        fun readFrom(inp: java.io.InputStream): Int {
-            val fingerprintToItem = mediaItems.associateBy { "${it.displayName}_${it.size}" }
-            var restored = 0
-            GZIPInputStream(inp).bufferedReader(Charsets.UTF_8).use { reader ->
-                reader.forEachLine { line ->
-                    val tab1 = line.indexOf('\t')
-                    if (tab1 < 0) return@forEachLine
-                    val tab2 = line.indexOf('\t', tab1 + 1)
-                    if (tab2 < 0) return@forEachLine
-                    val displayName = line.substring(0, tab1)
-                    val size  = line.substring(tab1 + 1, tab2).toLongOrNull() ?: return@forEachLine
-                    val md5   = line.substring(tab2 + 1).trim()
-                    if (md5.length != 32) return@forEachLine
-                    val item  = fingerprintToItem["${displayName}_${size}"] ?: return@forEachLine
-                    photoHashStore.saveHash(item.id, item.size, md5)
-                    restored++
-                }
-            }
-            return restored
-        }
-
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val base         = PHOTO_HASH_BACKUP_FILENAME.removeSuffix(".txt.gz")
-
-        // Open the most-recent backup file.  Try order:
-        //  1. Direct file path — works when MANAGE_EXTERNAL_STORAGE is granted, finds the
-        //     original regardless of which install created it.  Most reliable on reinstall.
-        //  2. MediaStore LIKE query — catches numbered variants (1), (2) this install created.
-        val inputStream: java.io.InputStream? = run {
-            // Pass 1: direct path via MANAGE_EXTERNAL_STORAGE (Android 11+)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                && android.os.Environment.isExternalStorageManager()
-            ) {
-                // Pick newest file whose name starts with our base name.
-                // Match ".gz" not ".txt.gz" — auto-numbered copies are "name.txt (1).gz".
-                val newest = downloadsDir.listFiles { f ->
-                    f.name.startsWith(base) && f.name.endsWith(".gz")
-                }?.maxByOrNull { it.lastModified() }
-                if (newest != null) {
-                    DebugLog.i("gallery", "Restore: found ${newest.name} via direct path")
-                    try { return@run newest.inputStream() } catch (_: Exception) {}
-                }
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Pass 2: MediaStore LIKE query — finds (1)/(2) variants owned by this install
-                val collection = MediaStore.Downloads.getContentUri("external")
-                try {
-                    resolver.query(
-                        collection,
-                        arrayOf(MediaStore.Downloads._ID),
-                        "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
-                        arrayOf("$base%.gz"),
-                        "${MediaStore.Downloads.DATE_MODIFIED} DESC"
-                    )?.use { cursor ->
-                        if (!cursor.moveToFirst()) return@use null
-                        val id  = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID))
-                        val uri = ContentUris.withAppendedId(collection, id)
-                        DebugLog.i("gallery", "Restore: found $uri via MediaStore")
-                        resolver.openInputStream(uri)
-                    }
-                } catch (e: Exception) {
-                    Log.w("GalleryViewModel", "MediaStore restore query failed", e); null
-                }
-            } else {
-                // Pre-Q: direct file path, no special permission needed
-                val file = java.io.File(downloadsDir, PHOTO_HASH_BACKUP_FILENAME)
-                if (file.exists()) try { file.inputStream() } catch (_: Exception) { null } else null
-            }
-        }
-
-        if (inputStream == null) {
-            DebugLog.i("gallery", "Photo hash backup: no backup file found — will hash from scratch")
-            // no backup — log already written above
-            return
-        }
-
-        try {
-            val restored = inputStream.use { readFrom(it) }
-            photoHashStore.flush()
-            DebugLog.i("gallery", "Photo hash restore: $restored / ${mediaItems.size} entries restored")
-            // restore complete — count already logged above
-        } catch (e: Exception) {
-            DebugLog.e("gallery", "restorePhotoHashFromBackup read failed", e)
-            // restore failed — error already logged above
-        }
     }
 
     // ── BM25 index cache ──────────────────────────────────────────────────────

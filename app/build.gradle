@@ -18,7 +18,7 @@ android {
         applicationId "com.anant.mediacurator"
         minSdk 26
         targetSdk 35
-        versionCode 33
+        versionCode 34
         versionName "1.1"
     }
 
@@ -106,6 +106,9 @@ dependencies {
     implementation 'com.github.chrisbanes:PhotoView:2.3.0'
     // PDF text extraction (Apache PDFBox Android port)
     implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
+    // Background-finish indexing: hashing + geo continue while the app is closed / after an
+    // OEM lock-kill (WorkManager reschedules across process death).
+    implementation 'androidx.work:work-runtime-ktx:2.9.1'
 
     // Fast JVM unit tests for the pure curation rules (no device / Robolectric needed).
     testImplementation 'junit:junit:4.13.2'

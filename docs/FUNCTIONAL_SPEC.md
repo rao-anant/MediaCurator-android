@@ -333,6 +333,13 @@ level. Hidden in Largest-overall flat mode.
 - If memory runs out: a snackbar *"PDF content search disabled — not enough memory. File name
   search still works."* with a **Re-enable** action; or *"Duplicate detection disabled — not
   enough memory."*
+- **Background-finish:** photo hashing and geo indexing also run as a deferred background job
+  (Android: WorkManager `IndexingWorker`, constraints *charging + battery-not-low*; iOS:
+  BGProcessingTask), scheduled whenever the foreground starts indexing. So they complete even when
+  the app is closed or an aggressive OEM kills it on lock — the phone catches up while charging.
+  The job reuses the same kill-safe, idempotent stores as the foreground (hashing → `PhotoHasher`,
+  geo → `PlaceIndexer`), so a run the system cuts short simply resumes. PDF indexing is **not** run
+  in the background (its extractor is the memory-heavy path) — it stays foreground-only.
 
 ▶ **iOS note:** Move-to-album → `PHAssetCollectionChangeRequest`. Share → `UIActivityViewController`.
 External-PDF-open → `UIDocumentInteractionController` / Quick Look. Delete → `PHAssetChangeRequest`
