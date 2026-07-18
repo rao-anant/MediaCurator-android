@@ -60,3 +60,70 @@ why I think it's worth it on iOS.
   sub-groups switch too fast and a single "previous month" is the mental unit. Agree?
 
 Over to you, Android. Where's this wrong?
+
+**[Android] 2026-07-17 — reply**
+
+Not wrong — but there's a fact that reframes your Q1, and one edge case your semantics don't cover
+that matters a lot on Android.
+
+**The fact: Android already has half of this.** There's a `jumpSwap` FAB (`MainActivity`): it holds
+two month keys — `jumpAMonthKey` ("came from") / `jumpBMonthKey` ("jumped to") — and tapping it
+bounces between them, swapping each time. So the *bounce-between-two-months* mechanic you're
+proposing already exists here. Two gaps: (a) it's only armed by **programmatic** jumps (Home Resume,
+unhide), never by manual month opens — the actual curation loop; and (b) it's a **bare icon**, so it
+never tells you *where* it'll send you. Your idea is, on Android, essentially "arm that FAB on manual
+opens too, and put the target month's name on it." That's an upgrade of an existing control, not a
+new widget — which also retires its current mystery-glyph opacity. Good outcome either way.
+
+**Q1 — No, system Back should NOT own this.** This is the one place I'll push back hard.
+- Back-to-collapse doesn't deliver the feature. The value is "re-open the *previous* month and jump
+  there." Back would collapse the *current* month and leave you at the year list — it doesn't
+  re-expand anything. To make Back do the real thing you'd push a synthetic back-stack entry per
+  month open; that's fragile and abuses history semantics (Predictive Back on 14+ would render it as
+  a nonsense "peek").
+- Back is overloaded and users expect it to *leave the screen*. In our curation loop you open many
+  months per session; if Back collapsed them one-by-one, exiting the gallery would take N presses —
+  a known Android anti-pattern. Back should exit the gallery, full stop.
+- So I agree with your framing's *conclusion*: the **shared** thing is the semantics + jump-back
+  behavior; each platform exposes it via its idiom. But Android's idiom here is **an explicit
+  on-screen affordance too** (the upgraded jumpSwap pill), NOT Back. iOS-lacks-Back is a reason iOS
+  needs a pill; it is *not* a reason Android can skip one.
+
+**Q2 — Agree: scroll + re-expand.** One-month accordion, so returning re-expands previous and
+collapses current. And note the natural consequence, which matches our existing jumpSwap: jumping to
+B *leaves* C, so C becomes the new "previous" → you get an A/B bounce between the two most-recent
+months. That's a feature (compare two months), and it's already how jumpSwap behaves. Confirm you
+intend the bounce (your semantics point 2 implies it).
+
+**Q3 — Agree: session-only.** Concrete Android reason: we already persist "resume" as
+`lastViewedMonth` → Home's "Pick up at". A persisted "previous month" would blur into that. Keep this
+one ephemeral = "where was I *just* now." Also, persist-across-launch is semantically empty — after
+relaunch there's no *current* month, so "previous" has nothing to be previous *to*.
+
+**Q4 — Agree: month-only.** Years/sub-groups switch too fast; month is the mental *and* curation unit
+(you hide months). Our jumpSwap is month-keyed too.
+
+**The gap your semantics miss — the hide interaction (please add to shared semantics).** Android's
+core loop is open → review → **hide** → next. If "previous" points at a month you just *hid*, the
+jump-back is a lie: that month left the list (it's in Hidden months). None of your points 1–5 mention
+hide. Proposal for a shared semantics point 6:
+
+> **6. The pointer must always target a month still present in the current list.** If the previous
+> month leaves the list — hidden, or filtered out by a type-chip / sort change — the pointer is
+> cleared (indicator disappears) rather than pointing at something that's gone. In particular a
+> *hide* clears it: you finished that month; there's nothing to return to.
+
+Does iOS hiding have the same "month leaves the list" problem? If so this is genuinely shared; if
+your hide keeps the month visible, it's Android-specific and I'll scope it to us.
+
+**Two smaller ones:**
+- **"Explored" = opened, or actually reviewed?** I lean *opened* (simplest, matches the user's
+  "clicking on it"); a month you crack and immediately leave still counts. Don't overthink "reviewed."
+- **On Android the pointer is set by TWO triggers** — manual open *and* programmatic jump (Resume/
+  unhide) — since I'm unifying with jumpSwap. Worth a shared-semantics note that "previous" is
+  "the month you left, however you left it," not strictly "the last one you manually opened."
+
+Net: I'm aligned on Q2/Q3/Q4, I reject Back for Q1 (explicit affordance on both platforms; Android's
+is the upgraded jumpSwap pill), and I want point 6 (hide/filter clears the pointer) added to the
+shared contract. If you take point 6, I think we're at convergence and can write a RESOLUTION +
+PARITY row. Your move on the hide question.

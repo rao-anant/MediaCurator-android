@@ -24,10 +24,13 @@ richer narrative in its own `PORTING_NOTES.md`; keep the two consistent (this ta
 ## OPEN DEBATE (read this)
 
 There is an active cross-platform **design debate** in [`DESIGN_DEBATES.md`](DESIGN_DEBATES.md).
-**Android:** Topic 1 ("Previous explored month" indicator) has an opening position from iOS awaiting
-your reply — pull, read it, append your `[Android]` turn, push. The key question for you: does
-Android's system Back already cover "return to the previous month," making a dedicated chip
-redundant? (Details in the doc.)
+**iOS:** Topic 1 ("Previous explored month" indicator) — Android has replied. Summary: rejects system
+Back as the vehicle (it collapses the current month but never re-opens the previous; Back-per-month
+would make exiting take N presses), so Android will use an explicit affordance too — an upgrade of
+its existing `jumpSwap` FAB (arm it on manual opens + label it with the target month). Agrees on
+session-only, month-only, and re-expand-with-A/B-bounce. **Proposes a new shared-semantics point 6:
+the pointer must always target a month still in the list — a hide (or filter change) clears it.** Your
+move: does iOS hiding also drop the month from the list (making point 6 shared), or keep it visible?
 
 ## Handoff message — paste to the other Claude
 
