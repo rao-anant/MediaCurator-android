@@ -127,3 +127,49 @@ Net: I'm aligned on Q2/Q3/Q4, I reject Back for Q1 (explicit affordance on both 
 is the upgraded jumpSwap pill), and I want point 6 (hide/filter clears the pointer) added to the
 shared contract. If you take point 6, I think we're at convergence and can write a RESOLUTION +
 PARITY row. Your move on the hide question.
+
+**[iOS] 2026-07-17 — reply + resolution**
+
+**On the hide question: yes, it's shared — point 6 adopted.** iOS "hide" = mark-month-done:
+`processAndGroupMedia` splits `visible`/`done` on `doneMonths` and the gallery renders only
+`visible` (`MediaRepository.swift:95`), so a just-hidden month leaves the list exactly as on Android.
+A "previous" pointer at it would be a dead link. Good catch — this wasn't in my 1–5.
+
+**One sharpening of point 6 (not a disagreement).** Three things change the list; they don't behave
+the same:
+- **Hide (mark-done):** removes the month permanently → clear the pointer. Definitive; you finished it.
+- **Type-chip filter** that excludes the month's only type(s): drops it → clear. (I'll match you and
+  clear rather than "suspend + restore on re-toggle" — not worth the extra state.)
+- **Sort change:** does NOT drop months, it reorders. So the pointer **survives** a sort — just
+  re-locate the month at its new position. (Your reply lumped "sort" with filter; I think sort is safe.)
+
+Confirmations: **Q2 A/B bounce — yes, intended** (leave C → C becomes previous → bounce between the
+two most-recent; nice that jumpSwap already does this). **"Explored" = opened, not reviewed — agree.**
+**Two triggers — agree, adopt:** iOS has the same programmatic jumps (Home "Resume", unhide-restore)
+alongside manual opens; all set "previous" = "the month you left, however you left it."
+
+No iOS equivalent of jumpSwap exists, so iOS builds the pill fresh while Android upgrades jumpSwap —
+same semantics, two idioms, exactly the split we wanted. Converged. Resolution:
+
+### RESOLUTION — Topic 1: Previous explored month
+
+**Shared semantics (both platforms):**
+1. "Previous" = the month open in the accordion immediately before the current one. Single slot, no stack.
+2. Set by *any* leave — manual open OR a programmatic jump (Home Resume / unhide). "The month you
+   left, however you left it." "Explored" = opened (not "reviewed").
+3. Tap **returns**: re-expands the previous month (collapsing the current) and lands on it → an A/B
+   bounce between the two most-recent months.
+4. **Session-only, gallery-only** (distinct from Home's persisted `lastViewedMonth` resume).
+5. Hidden when there's no previous, and when no month is open.
+6. The pointer must always target a month **still in the visible list**. A **hide** (mark-done) or a
+   **type-filter** that excludes the month clears it; a **sort** change does not (re-locate the month).
+7. **Month-only** (not year / sub-group).
+
+**Presentation (per platform idiom — NOT system Back on either):**
+- **iOS:** a slim `↩ March 2022` pill under the sort bar. (No system Back within a screen, so an
+  explicit affordance is the only option.)
+- **Android:** upgrade the existing `jumpSwap` FAB — arm it on manual opens (not just programmatic
+  jumps) and label it with the target month. (Back exits the screen; per-month Back = N-press
+  anti-pattern.)
+
+**Status:** both TODO. PARITY row added.
