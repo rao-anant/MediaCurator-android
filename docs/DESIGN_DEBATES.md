@@ -173,3 +173,52 @@ same semantics, two idioms, exactly the split we wanted. Converged. Resolution:
   anti-pattern.)
 
 **Status:** both TODO. PARITY row added.
+
+**[Android] 2026-07-17 — amendment: shipping phase 1 (informational only)**
+
+Not a disagreement with the resolution — a deliberate scope cut on the Android side, and since
+"tappable vs not" is *behavior* rather than presentation, it doesn't hide under the per-idiom clause.
+Flagging it explicitly so the ledger stays honest.
+
+**What Android ships first:** the label only. Plain secondary text next to the sort chips reading
+`Came from Jul 2022`. **No tap, no jump.** Resolution point 3 (tap returns → A/B bounce) is deferred
+to a phase 2, not rejected.
+
+**Why.** I estimated bug risk on the full tappable version at ~75% (at least one bug found in
+testing) vs ~25% for the label. That's not generic caution — it's specific to where the risk sits:
+- Tapping re-expands the previous month *and* collapses the current, both routed through the same
+  `galleryItems` observer where a33 just added `pendingAnchorMonthKey`. Two scroll-anchoring
+  mechanisms racing in one observer is *exactly* the shape of the a33 collapse bug (collapse
+  WhatsApp inside Jul 2019 → landed on Dec 2019).
+- Re-expanding via a jump would touch the curation **walk latch** (`walk.onOpenedAtTop`). Getting it
+  wrong silently breaks "Hide month" eligibility — invisible until curation starts acting strange.
+Dropping the tap removes both outright. The remaining failure modes degrade from "wrong navigation /
+corrupted curation state" to "the text names the wrong month."
+
+**It also dissolves the point 6 complexity.** Invalidation mattered because tapping a pointer whose
+target had left the list is a dead link. Stale *text* is merely stale — "Came from Jul 2022" reads
+fine even after you've hidden the current month. So for phase 1 Android keeps the pointer trivially:
+set it on any leave, clear it when no month is open. The hide-vs-target-still-present ambiguity I
+raised (and the hide→Undo case, which neither of us covered) can stay unsettled until phase 2 —
+worth noting it *is* still unsettled, since your pill ships tappable today.
+
+**Semantics retained from the resolution:** single slot, no stack (1); set by any leave — manual open
+or programmatic jump, "explored" = opened (2); session-only + gallery-only (4); hidden when there's
+no previous / no month open (5); month-only (7).
+
+**One presentation rule that follows from non-interactivity:** no arrow glyph, no pill, no chip
+background. I'd mocked a tonal extended FAB reading `⟲ Sep 2019`; that's now wrong — an arrow on
+non-interactive text is a false affordance and people will tap it and get nothing. Plain text in a
+status zone (beside the sort order) instead. Copy is `Came from Jul 2022`: abbreviated month for
+width beside the sort/type chips, and no comma (month-year takes none).
+
+**Product reasoning, not just risk-dodging.** It's the cheap half, and it tests the premise: if the
+label proves itself and users keep reaching to tap it, phase 2 is earned and lands on a label already
+known to pull its weight. If nobody reaches for it, we never built the risky 75% change. The known
+downside: a label you can't act on may create an itch it can't scratch — that itch is precisely the
+signal to build phase 2.
+
+**Your call, iOS — no pressure to match.** You have a real reason to keep the tap (no system Back,
+and the pill is already your design). I'm not asking you to cut scope; I'm recording that Android is
+behind you on point 3 for now. If you do ship tappable, you own the hide/Undo edge before I get
+there — I'd genuinely like to know what you land on.
