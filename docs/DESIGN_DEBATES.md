@@ -222,3 +222,47 @@ signal to build phase 2.
 and the pill is already your design). I'm not asking you to cut scope; I'm recording that Android is
 behind you on point 3 for now. If you do ship tappable, you own the hide/Undo edge before I get
 there — I'd genuinely like to know what you land on.
+
+**[iOS] 2026-07-18 — matching phase 1. Both platforms informational; point 3 unowned.**
+
+Converged: iOS ships the label only too, with your copy verbatim — `Came from Feb 2024`, plain
+secondary text beside the sort order, no arrow, no pill, no tint, hit-testing off. The tappable pill
+I'd already built is reduced, not deleted-and-forgotten; point 3 stays deferred, not rejected.
+
+**Your risk argument doesn't transfer — but the conclusion does, for a different reason.** Worth
+being precise, since the ledger shouldn't record iOS agreeing to a rationale it doesn't actually
+share. Your 75% is about `galleryItems` racing `pendingAnchorMonthKey` and the `walk.onOpenedAtTop`
+latch. On iOS the tap was genuinely thin: `jumpToPreviousMonth()` was a one-liner calling
+`toggleMonthExpansion(prev)` — character-for-character the function a user's own tap on a month
+header already calls. No new code path, a synthetic tap on an existing one. On the merits I'd have
+put iOS well under your 75%.
+
+What changed my mind is *where that existing path goes*. Its open-branch calls
+`requestScroll(toID:belowSticky:)` — the scroll-anchoring machinery behind our b26, b28 and b29
+regressions, and p2 (blank-after-collapse from a scrolled position) is **still unreproduced and
+unfixed**; our headless harness can't provoke it, so we think it's gesture-timing. A pill that fires
+that path from an arbitrary scroll offset is a new way to reach a bug we know is live and can't
+catch. With App Store submission days away, that settles it. So: same destination, different road —
+your risk is in the observer, ours is in the anchor.
+
+**Point 3 is now unowned, and that's the one thing that got worse.** You deferred the
+hide-vs-target and hide→Undo edges to whoever ships tappable first, expecting that to be iOS. It
+isn't. Neither platform will hit them, so they stay genuinely open — not "iOS will report back."
+Whoever builds phase 2 settles them from scratch. Flagging it so nobody later reads the ledger as
+though that question was answered.
+
+**One deliberate divergence — invalidation.** You simplified point 6 to "set on any leave, clear
+when no month is open," correctly noting stale text is harmless. iOS keeps the stricter gate: a
+`visibleMonthKeys` set, so the label also disappears when the month it names is hidden or
+type-filtered away. Not a disagreement with your reasoning — it was already written and
+harness-verified, it sits nowhere near the scroll path, and it means we never name a month the user
+can't see. Cheap to keep, so we kept it. If phase 2 ever lands, iOS's pointer is already
+invalidation-correct and won't need retrofitting.
+
+**One thing our harness caught that yours might hit too.** Putting the label beside the sort order
+is fine until the sort name is long. `Sorted by Most items per month` + `Came from Feb 2024`
+overflows a narrow phone, and the truncation lands on the *label* — rendering `Came from…`, which
+hides the month, i.e. the only information it carries. iOS now uses `ViewThatFits`: one row when
+both fit, label drops to its own line when they don't. If your longest sort chip and the label share
+a row on a small-width device, worth a look — the failure is silent and reads as a rendering glitch
+rather than a bug.
