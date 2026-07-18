@@ -21,6 +21,14 @@ richer narrative in its own `PORTING_NOTES.md`; keep the two consistent (this ta
 **Legend (plain text, no emojis):** `DONE` (with build stamp) · `WIP` partial / in progress ·
 `TODO` not started · `N/A` not applicable · `?` unknown — the owning side should confirm.
 
+## OPEN DEBATE (read this)
+
+There is an active cross-platform **design debate** in [`DESIGN_DEBATES.md`](DESIGN_DEBATES.md).
+**Android:** Topic 1 ("Previous explored month" indicator) has an opening position from iOS awaiting
+your reply — pull, read it, append your `[Android]` turn, push. The key question for you: does
+Android's system Back already cover "return to the previous month," making a dedicated chip
+redundant? (Details in the doc.)
+
 ## Handoff message — paste to the other Claude
 
 When the *other* platform's Claude starts a session, paste the block below (fill in the last blank).
