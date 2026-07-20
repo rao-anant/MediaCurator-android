@@ -139,12 +139,17 @@
             android:scrollbars="vertical" />
 
         <!-- Sticky header — pins year + month context at top as the user scrolls -->
+        <!-- Opaque background is REQUIRED: only the rows inside carry a colour, so when the bar is
+             dimmed (viewport outside the frozen section) the list would otherwise show straight
+             through it and read as a rendering glitch rather than a dimmed state. This layer stays
+             fully opaque and the rows dim over it. -->
         <LinearLayout
             android:id="@+id/stickyHeader"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="top"
             android:orientation="vertical"
+            android:background="@color/surface"
             android:elevation="6dp"
             android:visibility="gone">
 
@@ -158,7 +163,6 @@
                 android:background="@color/surface_variant"
                 android:paddingStart="14dp"
                 android:paddingEnd="16dp"
-                android:clickable="true"
                 android:focusable="true">
 
                 <TextView
@@ -199,8 +203,6 @@
                 android:background="@color/surface"
                 android:paddingStart="28dp"
                 android:paddingEnd="12dp"
-                android:clickable="true"
-                android:focusable="true"
                 android:visibility="gone">
 
                 <TextView
@@ -247,8 +249,6 @@
                 android:background="@color/background"
                 android:paddingStart="44dp"
                 android:paddingEnd="12dp"
-                android:clickable="true"
-                android:focusable="true"
                 android:visibility="gone">
 
                 <TextView

@@ -1,11 +1,14 @@
 package com.anant.mediacurator
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -64,6 +67,13 @@ class MainActivity : AppCompatActivity() {
     // an unrelated month. Anchor the parent level instead, one step up like the in-list tree.
     private var pendingAnchorMonthKey: String? = null    // collapse → land on this month header
     private var pendingAnchorYear: Int? = null           // collapse → land on this year header
+
+    // What each pinned row currently represents, so a tap on the bar knows what to collapse. Held as
+    // state rather than click listeners because the bar forwards drags to the list — see
+    // [setupStickyHeaderTouch].
+    private var stickyTapYear: Int? = null
+    private var stickyTapMonthKey: String? = null
+    private var stickyTapSubKey: String? = null
 
     // Released once the durable "demo already shown" marker has been consulted — blocks the
     // first-run demo from flashing on a reinstall before that read completes.
@@ -236,6 +246,72 @@ class MainActivity : AppCompatActivity() {
                 updateHideBar()
             }
         })
+
+        setupStickyHeaderTouch()
+    }
+
+    /**
+     * The pinned bar sits ON TOP of the list, so without this any swipe that *starts* on it is
+     * swallowed and the list doesn't move. With the bar permanently present and up to three rows
+     * tall, that's a big dead zone right where a thumb naturally begins a scroll — it made earlier
+     * years unreachable until you collapsed the open month.
+     *
+     * So the bar forwards drags and flings straight to the RecyclerView and only acts on real taps.
+     * Taps are routed by hit-testing the row bounds rather than using per-row click listeners, since
+     * a child click listener would consume the gesture before we could tell a drag from a tap.
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupStickyHeaderTouch() {
+        val detector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent) = true
+
+            override fun onScroll(
+                e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float
+            ): Boolean {
+                // distanceY is positive when the finger moves up, which is also the direction
+                // RecyclerView.scrollBy takes to advance down the list — so it passes straight through.
+                binding.recyclerView.scrollBy(0, distanceY.toInt())
+                return true
+            }
+
+            override fun onFling(
+                e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float
+            ): Boolean {
+                binding.recyclerView.fling(0, -velocityY.toInt())
+                return true
+            }
+
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                handleStickyTap(e.y)
+                return true
+            }
+        })
+        binding.stickyHeader.setOnTouchListener { _, ev -> detector.onTouchEvent(ev) }
+    }
+
+    private fun hideStickyHeader() {
+        binding.stickyHeader.isVisible = false
+    }
+
+    /** Collapse whichever pinned row was tapped — one level, matching the in-list tree chevrons. */
+    private fun handleStickyTap(y: Float) {
+        when {
+            binding.stickyYearRow.isVisible && y <= binding.stickyYearRow.bottom ->
+                stickyTapYear?.let { yr ->
+                    pendingAnchorYear = yr
+                    viewModel.toggleYearExpansion(yr)
+                }
+            binding.stickyMonthRow.isVisible && y <= binding.stickyMonthRow.bottom ->
+                stickyTapMonthKey?.let { k ->
+                    pendingAnchorMonthKey = k
+                    viewModel.toggleMonthExpansion(k)
+                }
+            binding.stickySubRow.isVisible ->
+                stickyTapSubKey?.let { s ->
+                    pendingAnchorMonthKey = stickyTapMonthKey
+                    viewModel.toggleSubGroupExpansion(s)
+                }
+        }
     }
 
     private fun setupFilterChips() {
@@ -1397,112 +1473,90 @@ class MainActivity : AppCompatActivity() {
 
     // ── Sticky header ─────────────────────────────────────────────────────────
 
+    /**
+     * The pinned context bar — FROZEN, not positional (DESIGN_DEBATES Topic 2, revised spec).
+     *
+     * It reflects the **drill-down state** — which month / sub-group the user has open — and never
+     * scroll position. That is the whole point: every earlier bug here came from deriving the bar by
+     * walking back from the top visible row (lines vanishing when a header hit the viewport top; the
+     * bar entering and leaving; the walk-back terminating on a YearHeader that was scrolled invisibly
+     * *under* this very overlay). With the accordion state as the source, none of those are
+     * expressible — the bar simply cannot move while you scroll, by construction rather than by rule.
+     *
+     * The one scroll-dependent property is [R3] dimming, and it is deliberately cosmetic: getting it
+     * wrong yields a wrong *shade*, never motion and never a wrong label.
+     */
     private fun updateStickyHeader(firstVisiblePos: Int = -1) {
         // No sticky header in flat size-absolute mode
         if (viewModel.sortMode.value == SortMode.SIZE_ABSOLUTE) {
-            binding.stickyHeader.isVisible = false
+            hideStickyHeader()
             return
         }
-
-        val lm = binding.recyclerView.layoutManager as? LinearLayoutManager ?: return
-        val firstPos = if (firstVisiblePos >= 0) firstVisiblePos
-                       else lm.findFirstVisibleItemPosition()
-        if (firstPos < 0) { binding.stickyHeader.isVisible = false; return }
 
         val list = adapter.currentList
 
-        // The overlay DRAWS OVER the list, but the LayoutManager doesn't know that: a row scrolled
-        // under the pinned bar is still reported by findFirstVisibleItemPosition(). Taking context
-        // from it is wrong — the user can't see it. Worse, when the covered row is the YearHeader the
-        // walk-back below terminates on its very first step, so month and sub-group came back null
-        // and only the year line ever appeared.
-        //
-        // So advance to the first row that is actually visible BELOW the overlay, and derive context
-        // from there.
-        val coverBottom = if (binding.stickyHeader.isVisible) binding.stickyHeader.height else 0
-        var anchorPos = firstPos
-        while (anchorPos + 1 < list.size) {
-            val v = lm.findViewByPosition(anchorPos) ?: break
-            if (v.bottom > coverBottom) break        // partially visible → this is what the user sees
-            anchorPos++
-        }
-        val firstItem = list.getOrNull(anchorPos)
-
-        // Walk back from the anchor to the nearest YearHeader, Header and SubHeader enclosing it
-        var yearCtx:  GalleryItem.YearHeader? = null
-        var monthCtx: GalleryItem.Header?     = null
-        var subCtx:   GalleryItem.SubHeader?  = null
-        for (i in anchorPos downTo 0) {
-            val item = list.getOrNull(i) ?: break
-            if (subCtx   == null && item is GalleryItem.SubHeader) subCtx   = item
-            if (monthCtx == null && item is GalleryItem.Header)    monthCtx = item
-            if (item is GalleryItem.YearHeader) { yearCtx = item; break }
-        }
-
-        // The YEAR row is a permanent fixture: once we're anywhere inside a year it stays pinned and
-        // simply relabels as you cross into the next one. It never enters or leaves, so there's no
-        // "floating in and out" — the same guarantee iOS gets from pinned section headers. (The real
-        // in-list year header slides underneath this bar, which is the normal sticky-header look.)
-        if (yearCtx == null) {
-            binding.stickyHeader.isVisible = false
+        // Drill-down state: the accordion guarantees at most one open month. Nothing open means the
+        // user isn't working on anything, so there is nothing to pin.
+        val monthCtx = list.filterIsInstance<GalleryItem.Header>().firstOrNull { it.isExpanded }
+        if (monthCtx == null) {
+            hideStickyHeader()
             return
         }
+        val openKey = monthCtx.monthKey
+        val year    = openKey.substringBefore('-').toIntOrNull()
+        val yearCtx = list.filterIsInstance<GalleryItem.YearHeader>().firstOrNull { it.year == year }
+        val subCtx  = list.filterIsInstance<GalleryItem.SubHeader>()
+            .firstOrNull { it.isExpanded && it.monthKey == openKey }
+
         binding.stickyHeader.isVisible = true
+        // Year and month are always shown while a month is open; the sub row appears only when a
+        // sub-group is actually open. Each is driven by state, so none of them flickers on scroll.
+        binding.stickyMonthRow.isVisible = true
+        binding.stickySubRow.isVisible   = subCtx != null
 
-        // Month and sub-group rows follow the SAME rule as the year: pinned whenever that context
-        // exists, never hidden because of what happens to sit at the viewport top. Gating them on
-        // the top row made them vanish and reappear mid-scroll (open Aug 2017 -> WhatsApp, scroll:
-        // the month dropped out, then the category, then both "magically" returned a row later).
-        // The drill-down path you're inside doesn't change while you scroll, so neither should the
-        // bars describing it — they change only when you open something else.
-        binding.stickyMonthRow.isVisible = monthCtx != null
-        binding.stickySubRow.isVisible   = subCtx   != null
+        // ── R3: dim when the viewport has left the section the bar describes ──────────────────
+        // A frozen bar would otherwise silently label content that isn't on screen. Dimming keeps it
+        // perfectly still while making it obvious at a glance that you've scrolled away from it.
+        val lm = binding.recyclerView.layoutManager as? LinearLayoutManager
+        val headerPos = list.indexOfFirst { it is GalleryItem.Header && it.monthKey == openKey }
+        val footerPos = list.indexOfFirst { it is GalleryItem.Footer && it.monthKey == openKey }
+        val first = lm?.findFirstVisibleItemPosition() ?: RecyclerView.NO_POSITION
+        val last  = lm?.findLastVisibleItemPosition()  ?: RecyclerView.NO_POSITION
+        val inSection = if (headerPos < 0 || footerPos < 0 || first < 0 || last < 0) true
+                        else first <= footerPos && last >= headerPos   // ranges overlap
+        // Dim the ROWS, never the container: the container is the opaque backing that stops the list
+        // showing through. Fading it instead makes the bar look see-through rather than dimmed.
+        val dim = if (inSection) 1f else 0.5f
+        binding.stickyYearRow.alpha  = dim
+        binding.stickyMonthRow.alpha = dim
+        binding.stickySubRow.alpha   = dim
 
-        // Year row — always shown; tap behaviour: go up one level
-        binding.tvStickyYearArrow.text = if (yearCtx.isExpanded) "▼" else "▶"
-        binding.tvStickyYear.text      = yearCtx.year.toString()
-        binding.tvStickyYearStats.text = GalleryAdapter.formatTypeBreakdown(yearCtx.photoCount, yearCtx.videoCount, yearCtx.pdfCount, yearCtx.totalBytes)
-        val capturedYear = yearCtx.year
-        // One level at a time: collapse the month when its row is showing, else the year — so the
-        // tap always acts on the deepest level the bar is actually displaying.
-        if (monthCtx != null) {
-            val capturedMonthKey = monthCtx.monthKey
-            binding.stickyYearRow.setOnClickListener {
-                pendingAnchorMonthKey = capturedMonthKey   // → that year's month list, month in view
-                viewModel.toggleMonthExpansion(capturedMonthKey)
-            }
-        } else {
-            binding.stickyYearRow.setOnClickListener {
-                pendingAnchorYear = capturedYear           // → the all-years list, year in view
-                viewModel.toggleYearExpansion(capturedYear)
-            }
+        // ── Row content + taps. Each row collapses its OWN level, which is unambiguous now that all
+        // three are permanently on screen together. ───────────────────────────────────────────────
+        // Row targets are recorded as state, not click listeners: the bar has a single touch handler
+        // so it can forward drags to the list (see setupStickyHeaderTouch), and a child click
+        // listener would swallow the gesture before a drag could be told apart from a tap.
+        if (yearCtx != null) {
+            binding.tvStickyYearArrow.text = if (yearCtx.isExpanded) "▼" else "▶"
+            binding.tvStickyYear.text      = yearCtx.year.toString()
+            binding.tvStickyYearStats.text = GalleryAdapter.formatTypeBreakdown(
+                yearCtx.photoCount, yearCtx.videoCount, yearCtx.pdfCount, yearCtx.totalBytes)
         }
+        stickyTapYear = yearCtx?.year
 
-        // Month row — tap collapses the month
-        if (monthCtx != null) {
-            binding.tvStickyMonthArrow.text = if (monthCtx.isExpanded) "▼" else "▶"
-            binding.tvStickyMonth.text      = monthCtx.label
-            binding.tvStickyMonthStats.text = GalleryAdapter.formatTypeBreakdown(monthCtx.photoCount, monthCtx.videoCount, monthCtx.pdfCount, monthCtx.totalBytes)
-            val capturedMonthKey = monthCtx.monthKey
-            binding.stickyMonthRow.setOnClickListener {
-                pendingAnchorMonthKey = capturedMonthKey   // → that year's month list, month in view
-                viewModel.toggleMonthExpansion(capturedMonthKey)
-            }
-        }
+        binding.tvStickyMonthArrow.text = if (monthCtx.isExpanded) "▼" else "▶"
+        binding.tvStickyMonth.text      = monthCtx.label
+        binding.tvStickyMonthStats.text = GalleryAdapter.formatTypeBreakdown(
+            monthCtx.photoCount, monthCtx.videoCount, monthCtx.pdfCount, monthCtx.totalBytes)
+        stickyTapMonthKey = openKey
 
-        // Sub row — tap collapses the sub-group
         if (subCtx != null) {
             binding.tvStickySubArrow.text = if (subCtx.isExpanded) "▼" else "▶"
             binding.tvStickySubLabel.text = subCtx.label
-            binding.tvStickySubStats.text = GalleryAdapter.formatTypeBreakdown(subCtx.photoCount, subCtx.videoCount, subCtx.pdfCount, subCtx.totalBytes)
-            val capturedSubKey      = subCtx.subKey
-            val capturedSubMonthKey = subCtx.monthKey
-            binding.stickySubRow.setOnClickListener {
-                // → the parent month, still expanded: its sub-groups (Camera / WhatsApp) back in view
-                pendingAnchorMonthKey = capturedSubMonthKey
-                viewModel.toggleSubGroupExpansion(capturedSubKey)
-            }
+            binding.tvStickySubStats.text = GalleryAdapter.formatTypeBreakdown(
+                subCtx.photoCount, subCtx.videoCount, subCtx.pdfCount, subCtx.totalBytes)
         }
+        stickyTapSubKey = subCtx?.subKey
     }
 
     // ── Export / Import ───────────────────────────────────────────────────────
