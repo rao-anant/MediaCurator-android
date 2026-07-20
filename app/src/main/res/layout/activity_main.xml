@@ -15,6 +15,10 @@
         android:fitsSystemWindows="true"
         app:elevation="4dp">
 
+        <!-- PINNED, like every row below it. No child of this AppBarLayout declares
+             layout_scrollFlags, so the whole header is fixed: the top strip is read-only and all
+             movement happens in the photo list. A collapsing toolbar is the more common Android
+             idiom, but here it slid up under the status bar mid-scroll and read as unstable. -->
         <androidx.appcompat.widget.Toolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
@@ -22,10 +26,13 @@
             android:background="@color/surface"
             app:titleTextColor="@color/on_surface"
             app:subtitleTextColor="@color/on_surface_variant"
-            app:title="@string/app_name"
-            app:layout_scrollFlags="scroll|enterAlways" />
+            app:title="@string/app_name" />
 
-        <!-- Sort chip row — sits above the type cards (toolbar subtitle is reserved for progress) -->
+        <!-- Sort chip row — sits above the type cards (toolbar subtitle is reserved for progress).
+             PINNED: no layout_scrollFlags, so it stays put while the list scrolls. An AppBarLayout
+             child without flags is fixed; children WITH flags must be declared before those without,
+             which is why the scrolling Toolbar stays first. Keeps the "Came from" label visible
+             exactly when you're deep in a month and most likely to want it. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -34,8 +41,8 @@
             android:paddingStart="10dp"
             android:paddingEnd="10dp"
             android:paddingTop="4dp"
-            android:background="@color/surface"
-            app:layout_scrollFlags="scroll|enterAlways">
+            android:paddingBottom="4dp"
+            android:background="@color/surface">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSort"
@@ -51,9 +58,25 @@
                 android:paddingBottom="4dp"
                 app:icon="@drawable/ic_sort"
                 app:iconSize="16dp" />
+
+            <!-- Previous explored month — INFORMATIONAL ONLY (phase 1, see DESIGN_DEBATES Topic 1).
+                 Deliberately plain text: no chip background, no arrow glyph, not clickable — an
+                 arrow or pill on untappable text is a false affordance. -->
+            <TextView
+                android:id="@+id/tvPrevMonth"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="10dp"
+                android:textSize="12sp"
+                android:textColor="@color/on_surface_variant"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:gravity="end"
+                android:visibility="gone" />
         </LinearLayout>
 
-        <!-- Stat cards row: Photos / Videos / PDFs -->
+        <!-- Stat cards row: Photos / Videos / PDFs — PINNED alongside the sort row (see above). -->
         <LinearLayout
             android:id="@+id/settingsBar"
             android:layout_width="match_parent"
@@ -64,8 +87,7 @@
             android:paddingEnd="8dp"
             android:paddingTop="6dp"
             android:paddingBottom="6dp"
-            android:background="@color/surface"
-            app:layout_scrollFlags="scroll|enterAlways">
+            android:background="@color/surface">
 
             <include
                 android:id="@+id/cardPhoto"

@@ -643,6 +643,44 @@ class MainActivity : AppCompatActivity() {
         adapter.currentList.filterIsInstance<GalleryItem.Header>()
             .firstOrNull { it.isExpanded }?.monthKey
 
+    private val shortMonthNames = arrayOf(
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    )
+
+    /** "2022-07" -> "Jul 2022". Abbreviated to fit beside the sort chip. */
+    private fun shortMonthLabel(key: String): String? {
+        val parts = key.split("-")
+        val year  = parts.getOrNull(0)?.toIntOrNull() ?: return null
+        val month = parts.getOrNull(1)?.toIntOrNull() ?: return null
+        if (month !in 1..12) return null
+        return "${shortMonthNames[month - 1]} $year"
+    }
+
+    /**
+     * "Came from Jul 2022" beside the sort chip — the month you last left.
+     *
+     * Phase 1 is INFORMATIONAL ONLY (DESIGN_DEBATES Topic 1): plain text, not clickable, no arrow.
+     * Shown only while a month is actually open — with nothing open there's nothing for it to be
+     * "previous" to. Search mode and flat size-sort need no special case: neither renders month
+     * headers, so [openMonthKey] is null there and the label hides itself.
+     *
+     * Resolution point 6 (never name a month that's left the list) is enforced here at render time
+     * rather than by clearing state on hide/filter events. One presence check covers all three list
+     * mutations correctly: a **hide** or a **type-filter** drops the month's header so the label
+     * disappears, while a **sort** only reorders — the header is still there, so it survives. It
+     * also self-heals: re-enabling a type chip brings the label back with no "suspend/restore" state.
+     */
+    private fun updatePrevMonthLabel() {
+        val prev = viewModel.previousMonthKey.value
+        val open = openMonthKey()
+        val stillListed = prev != null &&
+            adapter.currentList.any { it is GalleryItem.Header && it.monthKey == prev }
+        val label = prev?.takeIf { open != null && it != open && stillListed }
+            ?.let { shortMonthLabel(it) }
+        binding.tvPrevMonth.text = label?.let { "Came from $it" } ?: ""
+        binding.tvPrevMonth.isVisible = label != null
+    }
+
     /** Message nudging the user to review the still-unseen section(s), or null if none apply. */
     private fun reviewHintMessage(footer: GalleryItem.Footer, label: String): String? {
         // WhatsApp present ⇒ the two-section (Camera & Others / WhatsApp) layout.
@@ -675,9 +713,19 @@ class MainActivity : AppCompatActivity() {
      * month header lands just below the strip instead of hidden behind it. Reads the row's laid-out
      * height, falling back to its 60dp design height.
      */
-    private fun stickyHeaderOffset(): Int =
-        binding.stickyYearRow.layoutParams?.height?.takeIf { it > 0 }
+    /**
+     * How far below the top an anchored scroll must land to clear the pinned overlay.
+     *
+     * Must be the WHOLE overlay, not just the year row: it can be up to three rows (year + month +
+     * sub-group), so measuring one row landed the target ~2 rows too high, hidden underneath — which
+     * is what made "collapse November" appear to jump to a different month.
+     */
+    private fun stickyHeaderOffset(): Int {
+        val measured = binding.stickyHeader.takeIf { it.isVisible }?.height ?: 0
+        if (measured > 0) return measured
+        return binding.stickyYearRow.layoutParams?.height?.takeIf { it > 0 }
             ?: (60 * resources.displayMetrics.density).toInt()
+    }
 
     /**
      * Keep the list and the floating bottom bar separate: pad the RecyclerView's bottom by the bar's
@@ -888,6 +936,7 @@ class MainActivity : AppCompatActivity() {
             // background refreshes (indexing/hashing) don't wipe the user's scroll progress.
             binding.recyclerView.post { updateStickyHeader() }
             updateHideBarWhenSettled()
+            updatePrevMonthLabel()   // list rebuilt → the open month may have changed
             tryShowOnboarding()
 
             // Home "Resume" deep-link: land on the target month once the tree is built. Resolution:
@@ -906,6 +955,8 @@ class MainActivity : AppCompatActivity() {
                 pendingResumeKey = null
             }
         }
+
+        viewModel.previousMonthKey.observe(this) { updatePrevMonthLabel() }
 
         viewModel.searchResults.observe(this) { results ->
             if (results == null) {
@@ -1358,41 +1409,63 @@ class MainActivity : AppCompatActivity() {
                        else lm.findFirstVisibleItemPosition()
         if (firstPos < 0) { binding.stickyHeader.isVisible = false; return }
 
-        val list      = adapter.currentList
-        val firstItem = list.getOrNull(firstPos)
+        val list = adapter.currentList
 
-        // Walk back to find nearest YearHeader, Header, and SubHeader above the viewport top
+        // The overlay DRAWS OVER the list, but the LayoutManager doesn't know that: a row scrolled
+        // under the pinned bar is still reported by findFirstVisibleItemPosition(). Taking context
+        // from it is wrong — the user can't see it. Worse, when the covered row is the YearHeader the
+        // walk-back below terminates on its very first step, so month and sub-group came back null
+        // and only the year line ever appeared.
+        //
+        // So advance to the first row that is actually visible BELOW the overlay, and derive context
+        // from there.
+        val coverBottom = if (binding.stickyHeader.isVisible) binding.stickyHeader.height else 0
+        var anchorPos = firstPos
+        while (anchorPos + 1 < list.size) {
+            val v = lm.findViewByPosition(anchorPos) ?: break
+            if (v.bottom > coverBottom) break        // partially visible → this is what the user sees
+            anchorPos++
+        }
+        val firstItem = list.getOrNull(anchorPos)
+
+        // Walk back from the anchor to the nearest YearHeader, Header and SubHeader enclosing it
         var yearCtx:  GalleryItem.YearHeader? = null
         var monthCtx: GalleryItem.Header?     = null
         var subCtx:   GalleryItem.SubHeader?  = null
-        for (i in firstPos downTo 0) {
+        for (i in anchorPos downTo 0) {
             val item = list.getOrNull(i) ?: break
             if (subCtx   == null && item is GalleryItem.SubHeader) subCtx   = item
             if (monthCtx == null && item is GalleryItem.Header)    monthCtx = item
             if (item is GalleryItem.YearHeader) { yearCtx = item; break }
         }
 
-        // Hide when no year context, or the year header itself is already at the top
-        if (yearCtx == null || firstItem is GalleryItem.YearHeader) {
+        // The YEAR row is a permanent fixture: once we're anywhere inside a year it stays pinned and
+        // simply relabels as you cross into the next one. It never enters or leaves, so there's no
+        // "floating in and out" — the same guarantee iOS gets from pinned section headers. (The real
+        // in-list year header slides underneath this bar, which is the normal sticky-header look.)
+        if (yearCtx == null) {
             binding.stickyHeader.isVisible = false
             return
         }
-
         binding.stickyHeader.isVisible = true
 
-        // Sub row — only when inside a sub-group (sub-header itself has scrolled off top)
-        val showSub   = subCtx   != null && firstItem !is GalleryItem.SubHeader && firstItem !is GalleryItem.Header
-        // Month row — when inside a month and sub row is not shown OR when sub-header is the first visible item
-        val showMonth = monthCtx != null && firstItem !is GalleryItem.Header
-        binding.stickySubRow.isVisible   = showSub
-        binding.stickyMonthRow.isVisible = showMonth
+        // Month and sub-group rows follow the SAME rule as the year: pinned whenever that context
+        // exists, never hidden because of what happens to sit at the viewport top. Gating them on
+        // the top row made them vanish and reappear mid-scroll (open Aug 2017 -> WhatsApp, scroll:
+        // the month dropped out, then the category, then both "magically" returned a row later).
+        // The drill-down path you're inside doesn't change while you scroll, so neither should the
+        // bars describing it — they change only when you open something else.
+        binding.stickyMonthRow.isVisible = monthCtx != null
+        binding.stickySubRow.isVisible   = subCtx   != null
 
         // Year row — always shown; tap behaviour: go up one level
         binding.tvStickyYearArrow.text = if (yearCtx.isExpanded) "▼" else "▶"
         binding.tvStickyYear.text      = yearCtx.year.toString()
         binding.tvStickyYearStats.text = GalleryAdapter.formatTypeBreakdown(yearCtx.photoCount, yearCtx.videoCount, yearCtx.pdfCount, yearCtx.totalBytes)
         val capturedYear = yearCtx.year
-        if (monthCtx != null && (showMonth || showSub)) {
+        // One level at a time: collapse the month when its row is showing, else the year — so the
+        // tap always acts on the deepest level the bar is actually displaying.
+        if (monthCtx != null) {
             val capturedMonthKey = monthCtx.monthKey
             binding.stickyYearRow.setOnClickListener {
                 pendingAnchorMonthKey = capturedMonthKey   // → that year's month list, month in view
@@ -1406,7 +1479,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Month row — tap collapses the month
-        if (showMonth && monthCtx != null) {
+        if (monthCtx != null) {
             binding.tvStickyMonthArrow.text = if (monthCtx.isExpanded) "▼" else "▶"
             binding.tvStickyMonth.text      = monthCtx.label
             binding.tvStickyMonthStats.text = GalleryAdapter.formatTypeBreakdown(monthCtx.photoCount, monthCtx.videoCount, monthCtx.pdfCount, monthCtx.totalBytes)
@@ -1418,7 +1491,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Sub row — tap collapses the sub-group
-        if (showSub && subCtx != null) {
+        if (subCtx != null) {
             binding.tvStickySubArrow.text = if (subCtx.isExpanded) "▼" else "▶"
             binding.tvStickySubLabel.text = subCtx.label
             binding.tvStickySubStats.text = GalleryAdapter.formatTypeBreakdown(subCtx.photoCount, subCtx.videoCount, subCtx.pdfCount, subCtx.totalBytes)

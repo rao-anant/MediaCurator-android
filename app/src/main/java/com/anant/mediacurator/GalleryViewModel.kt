@@ -222,6 +222,13 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private val expandedYears     = Collections.synchronizedSet(mutableSetOf<Int>())
     private val expandedMonths    = Collections.synchronizedSet(mutableSetOf<String>())
     private val expandedSubGroups = Collections.synchronizedSet(mutableSetOf<String>())
+
+    // "Previous explored month" (DESIGN_DEBATES Topic 1, phase 1 = informational only).
+    // The month you last left, however you left it. Single slot, no stack. Deliberately NOT
+    // persisted: session-only and gallery-only, so it stays distinct from the Home screen's
+    // durable "pick up at" resume target. Lives here (not the Activity) so it survives rotation.
+    private val _previousMonthKey = MutableLiveData<String?>(null)
+    val previousMonthKey: LiveData<String?> = _previousMonthKey
     // "Seen" review keys for the Hide-Month gate: one per (month, sub-group, type) the user has
     // actually viewed on screen — e.g. "2024-03:cam:video". A type counts as seen only when its
     // sub-group is expanded WHILE that type's chip is on, so filtering a type out can't sneak
@@ -313,8 +320,14 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleMonthExpansion(monthKey: String) {
+        // Accordion invariant: at most one month is open, so "the month being left" is just the
+        // single current entry. Captured before we mutate the set.
+        val leaving = synchronized(expandedMonths) { expandedMonths.firstOrNull() }
         if (expandedMonths.contains(monthKey)) {
             expandedMonths.remove(monthKey)
+            // Collapsing is also "leaving" a month, so it becomes the previous one. Nothing is open
+            // now, so the label stays hidden — but it's ready if the user opens a different month.
+            _previousMonthKey.value = monthKey
         } else {
             // Accordion: only one month open at a time. Collapse any other open month (and all
             // sub-group expansions) so there's always a single focus and a single, stable Hide bar.
@@ -322,6 +335,14 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             expandedSubGroups.clear()
             expandedMonths.add(monthKey)
             prefs.saveExpandedSubGroups(expandedSubGroups.toSet())
+            _previousMonthKey.value = when {
+                // Switched straight from another month — that's the one we came from.
+                leaving != null && leaving != monthKey -> leaving
+                // Re-opened the very month we'd come from: we've arrived, so it isn't "previous"
+                // any more. Without this the label would name the month you're currently in.
+                _previousMonthKey.value == monthKey    -> null
+                else                                   -> _previousMonthKey.value
+            }
         }
         prefs.saveExpandedMonths(expandedMonths.toSet())
         structuralVersion++
