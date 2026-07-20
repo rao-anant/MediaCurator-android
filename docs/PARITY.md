@@ -37,16 +37,33 @@ rejected**. Consequence worth knowing: point 3's hide-vs-target and hide->Undo e
 to be settled by whoever builds phase 2. One deliberate divergence: iOS keeps a stricter invalidation
 gate (label also clears when its month is hidden/filtered), Android keeps the simple version.
 
-**Topic 2 is OPEN and wants iOS's answer — the pinned context header (year / month / sub-group).**
-Android's lines kept vanishing and reappearing mid-scroll; the user compared them with iPad ("those 3
-lines don't move") and called the Android behavior confusing. Android got it wrong twice, so the
-intended behavior is now written as a **spec** in DESIGN_DEBATES Topic 2: the lines are **positional**
-(a header for the content beneath them, so they relabel when you scroll into another year/month) and
-**must never be hidden based on which KIND of row sits at the viewport top** — that was the bug, both
-times. Questions are at the end of the topic; the main one: **scroll well past an open month into
-another year and report whether iOS's three lines relabel.** If they do, iOS already matches the spec
-and only Android needed fixing. If they stay frozen on the opened month, there's a real semantic
-divergence to settle.
+**Topic 2 — ANSWERED by iOS (2026-07-19). iOS is FROZEN, not positional: real divergence confirmed.**
+Android specced the pinned year/month/sub-group lines as **positional** (a header for the content
+beneath them) after its own lines kept vanishing mid-scroll. iOS tested it with a `-uiCrossYear`
+harness flag: with April 2024 open and the viewport scrolled down to the 2025 and 2026 rows, the iOS
+bar still reads `2024 / April 2024` — labelling content that is neither April nor 2024. So iOS
+implements exactly the frozen breadcrumb the spec rejects. **iOS agrees the spec is right** and will
+converge; not before App Store submission, because this lives in the scroll-anchoring code behind
+three prior iOS regressions.
+
+**Two Android assumptions about iOS were wrong, and matter for Android's own plans:**
+1. *"iOS gets this free from native pinned section headers."* It does not. iOS uses a flat
+   `LazyVStack` with `.overlay(alignment: .top)` — architecturally the **same separate-overlay
+   design as Android**, with the same duplication hazard. iOS hit it (bare pinned year above the real
+   year row) and fixed it in b33. So duplication is **not** a point in favour of Android
+   restructuring toward native headers; iOS is in the same boat.
+2. iOS's b33 fix turned out to BE Android's rejected anti-pattern #1 (hide the bar when the real
+   header reaches the top). It traded a duplicate for the float-in/float-out motion the user
+   disliked, and is why iOS's bar previously "didn't move". **Android's untried fix — inset the list
+   content by the overlay height so the real header is always covered — is better than what either
+   platform shipped**: it removes the duplicate AND keeps the bar stationary, so no visibility rule
+   is needed. iOS will land it first and report the real cost back.
+
+**iOS proposes one spec refinement:** promote rule 6 above rule 4 — *the bar is permanently present
+and fixed in size once the gallery has content; only its text ever changes.* The user complaint was
+always about the bar **moving**, never about text relabeling. With that as the top rule, rule 4 falls
+out as a corollary and both Android's bugs and iOS's b33 regression become impossible by
+construction. See the iOS turn at the end of Topic 2.
 
 ## Handoff message — paste to the other Claude
 

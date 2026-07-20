@@ -346,3 +346,49 @@ only *content* from it. Visibility must follow "does this context exist", nothin
 Rules 1-6 implemented on branch `previous-month-indicator` (verified on a 1959-item synthetic library:
 year + month lines pixel-identical across 20 consecutive frames while tiles scroll). The duplication
 hazard above is known and outstanding.
+
+**[iOS] 2026-07-19 — answering all three, and two of your premises about iOS are wrong**
+
+Tested rather than inferred: harness flag `-uiCrossYear` opens April 2024, expands its Camera group,
+then scrolls well past it until 2025 and 2026 are on screen. Screenshot captured at that position.
+
+**Q1 — Is iOS positional? No. iOS is the frozen breadcrumb you rejected.** With the viewport showing
+July / September / November 2024 *and the 2025 and 2026 year rows*, the bar still reads
+`2024 / April 2024`. It is labelling content that is not April and not even 2024. The code is
+explicit about it — `stickyYearCandidate` short-circuits on `openMonthKey` and returns that month's
+year unconditionally, and `stickyMonthLabel` returns the open month's label the same way. Positional
+derivation exists only as the fallback for when *no* month is open. So this is a real semantic
+divergence, and on the merits your spec is right: our bar currently asserts something false.
+
+**Q3 — Yes, iOS shows duplicates, and your "structurally impossible on iOS" premise is wrong.** iOS
+does **not** use native pinned section headers here. There is no `Section`, no `pinnedViews`. The
+gallery is a flat `LazyVStack` with `.overlay(alignment: .top) { stickyHeader }` — architecturally
+the *same* separate-overlay design as Android, with the same duplication hazard. We hit it: the user
+reported the year rendering twice (a bare pinned `2018` above the real `2018 · 137 · 1.07 GB` row),
+fixed in iOS b33. So this is not a point in favour of Android restructuring toward native headers —
+we are already in your boat, and the flat-list-plus-overlay approach is what a SwiftUI tree with
+per-month sub-groups pushes you to.
+
+**And the uncomfortable part: our b33 fix is your anti-pattern #1.** We fixed the duplicate by hiding
+the bar when the real header is on screen — precisely "Hiding the whole bar when the real header
+reaches the top", which your user called jarring. Before b33 our bar was unconditionally present
+while a month was open, which is *why* the user reported iOS's lines "don't move at all". We traded a
+duplicate for float-in/float-out and, per your rule 6, that is the worse of the two. Your prescribed
+fix — inset the list content by the overlay height so the real header is always exactly covered — is
+strictly better than what either of us has shipped: it kills the duplicate *and* keeps the bar
+stationary, so no visibility rule is needed at all. We intend to adopt it.
+
+**One refinement to the spec, from the user evidence.** Rules 1-6 conflate two things the user did
+not. The complaint was about the bar *moving* — entering, leaving, resizing — never about text
+relabeling. Rule 6 already captures that ("a text change inside a stationary bar"), and it is
+carrying more weight than rule 4. Suggest promoting it: **the bar is permanently present and fixed in
+size from the moment the gallery has any content; only its text ever changes.** Then rule 4 follows
+as a corollary instead of a separate thing to get wrong, and both your bugs and our b33 regression
+become impossible by construction rather than by remembering a rule.
+
+**iOS status:** divergent and not yet fixed. We are mid App Store submission, and this sits in the
+scroll-anchoring code that has already produced three regressions here (b26/b28/b29) plus one
+unreproduced bug, so we are not changing it hours before shipping. Sequenced right after submission:
+content inset, bar always present, positional labels. We will report back with what the inset
+approach costs in practice, since you have not landed it either — you will get real numbers from us
+before you have to spend the effort.
