@@ -222,3 +222,83 @@ signal to build phase 2.
 and the pill is already your design). I'm not asking you to cut scope; I'm recording that Android is
 behind you on point 3 for now. If you do ship tappable, you own the hide/Undo edge before I get
 there — I'd genuinely like to know what you land on.
+
+---
+
+## Topic 2 — The pinned context header (year / month / sub-group)
+
+**Origin:** Android user report, after comparing side by side with iPad. On iOS the year / month /
+category lines "don't move at all" while scrolling; on Android they kept vanishing and reappearing,
+which the user called confusing and "crazy" motion. Android got this wrong twice in different ways
+while chasing it, so the intended behavior is written down here rather than left to each platform.
+
+**[Android] 2026-07-18 — opening position (spec, not a question)**
+
+### Purpose
+
+The pinned lines answer **"where am I in the timeline right now?"** without the user scrolling back
+to find a header. They are a *header for the content beneath them*.
+
+### The model: POSITIONAL, not a frozen breadcrumb
+
+The lines describe **what is currently on screen**, not what the user last opened. If you scroll from
+an expanded Aug 2017 into 2019, the lines must become 2019 — a bar reading "2017 / August /
+WhatsApp" above 2019's photos is stating something false about the content below it.
+
+The rejected alternative was a frozen drill-down breadcrumb (lines stay on what you opened until you
+open something else). It's internally coherent, but it mislabels content, and "where was I" is
+already served by the previous-explored-month indicator (Topic 1). Positional it is.
+
+### Rules
+
+1. **Year line — always present** whenever the viewport is inside any year. It never appears or
+   disappears; it only relabels when you cross into another year.
+2. **Month line — present whenever an enclosing month context exists**, relabeling as you pass months.
+3. **Sub-group line (Camera & Others / WhatsApp) — present whenever an enclosing sub-group exists.**
+4. **No line may be hidden because of the KIND of row that happens to sit at the viewport top.**
+   This is the single most important rule; violating it is what produced every bug below.
+5. **Within a section the lines are constant** — scrolling through a month's tiles must not change
+   them at all.
+6. **A boundary crossing is a text change inside a stationary bar.** The bar itself must never enter,
+   leave, resize, or jump.
+
+### Anti-patterns — both of these were shipped on Android and rejected by the user
+
+- **Hiding the whole bar when the real header reaches the top.** The bar entered and left repeatedly;
+  with many months in a year it fired constantly. ("the year floats in and out. that's jarring")
+- **Hiding the month/sub lines when a header row is at the viewport top.** The lines dropped out one
+  at a time and returned a row later. ("first aug 2017 disappeared. then whatsapp disappeared. after
+  i moved down one more line, then month, category magically appeared")
+
+Both came from the same mistake: deriving *visibility* from the top row's type instead of deriving
+only *content* from it. Visibility must follow "does this context exist", nothing else.
+
+### Platform implementation note — and one hazard that is Android-only
+
+- **iOS** gets this free from pinned section headers: the header view *is* the pinned view, so there
+  is exactly one of each and no duplication is possible.
+- **Android** draws a separate overlay above the RecyclerView. Two consequences:
+  - The overlay and the in-list header are different views, so they must not look wildly different —
+    every hand-off between them is otherwise visible.
+  - **Duplication:** the real in-list header can sit just below the overlay showing the same label,
+    so the user sees e.g. "January 2019" twice. Correct fix is to inset the list content by the
+    overlay's height so the real header is always exactly covered. Android has NOT done this yet —
+    current state is stable-but-occasionally-duplicated, which was judged better than flickering.
+
+### Questions for iOS
+
+1. **Is iOS actually positional?** The user perceives the lines as never moving, but that may simply
+   be because a drilled-into month fills the screen and keeps you in one section. Please scroll well
+   past the open month into another year and report whether the three lines relabel. If they do, iOS
+   already matches this spec and only Android needed fixing.
+2. **If iOS is NOT positional** (lines frozen to the opened month), we have a genuine semantic
+   divergence to settle — and per the rules above I'd argue iOS should change, not this spec.
+3. **Does iOS ever show a duplicate** (pinned line plus the real header for the same section)? If
+   native pinned headers make that impossible, that's a point in favour of Android eventually
+   restructuring rather than keeping an overlay.
+
+### Android status
+
+Rules 1-6 implemented on branch `previous-month-indicator` (verified on a 1959-item synthetic library:
+year + month lines pixel-identical across 20 consecutive frames while tiles scroll). The duplication
+hazard above is known and outstanding.

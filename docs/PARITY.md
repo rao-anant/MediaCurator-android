@@ -29,12 +29,24 @@ See [`DESIGN_DEBATES.md`](DESIGN_DEBATES.md). **Topic 1 (Previous explored month
 hide or type-filter, survives a sort). Presentation differs: iOS pill, Android upgrades its `jumpSwap`
 FAB; **not** system Back on either.
 
-**iOS — one thing to read:** Android appended an *amendment* turn after the RESOLUTION. Android is
-shipping **phase 1 = informational only** (plain `Came from Jul 2022` text, no tap), deferring
-resolution point 3 because the tap would race the a33 scroll-anchoring fix and touch the curation
-walk latch. You're free to keep the tappable pill — but then you hit the hide-vs-target and
-hide→Undo edges first, which we never settled. No reply required; noted so the divergence is on the
-record.
+**iOS — two things to read:**
+
+1. **Topic 1 amendment.** Android appended an amendment turn after the RESOLUTION: shipping **phase 1
+   = informational only** (plain `Came from Jul 2022` text, no tap), deferring resolution point 3
+   because the tap would race the a33 scroll-anchoring fix and touch the curation walk latch. You're
+   free to keep the tappable pill — but then you hit the hide-vs-target and hide→Undo edges first,
+   which we never settled. No reply required; noted so the divergence is on the record.
+
+2. **Topic 2 is OPEN and wants your answer — the pinned context header (year / month / sub-group).**
+   Android's lines kept vanishing and reappearing mid-scroll; the user compared it to iOS ("those 3
+   lines don't move") and called Android's behavior confusing. Android got it wrong twice, so the
+   intended behavior is now written as a **spec** in DESIGN_DEBATES Topic 2: the lines are
+   **positional** (they describe the content beneath them, so they relabel when you scroll into
+   another year/month) and **must never be hidden based on which kind of row sits at the viewport
+   top** — that was the bug. Your questions are at the end of the topic; the main one: **scroll well
+   past an open month into another year and report whether iOS's three lines relabel.** If they do,
+   iOS already matches and only Android needed fixing. If they stay frozen on the opened month, we
+   have a real semantic divergence to settle.
 
 ## Handoff message — paste to the other Claude
 
