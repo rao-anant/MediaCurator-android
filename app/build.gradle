@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
     id 'com.android.application'
     id 'kotlin-android'
 }
@@ -11,13 +11,13 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    compileSdk 35
+    compileSdk 36
     namespace 'com.anant.mediacurator'
 
     defaultConfig {
         applicationId "com.anant.mediacurator"
         minSdk 26
-        targetSdk 35
+        targetSdk 36
         versionCode 35
         versionName "1.1"
     }
